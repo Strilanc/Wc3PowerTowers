@@ -1,0 +1,244 @@
+library SpawnLib requires QueueStructLib, PAM, Decal, Special
+    SpawnSet SpawnLib_TriggeringSpawnSet = 0
+    unit SpawnLib_TriggeringUnit = null
+    
+    private trigger callBackTriggerEmptySpawnSet = CreateTrigger()
+    private trigger callBackTriggerSpawned = CreateTrigger()
+    private integer totalSpawnSets = 0
+    private integer totalSpawnStreams = 0
+    private integer totalUnits = 0
+    private group livingUnits = CreateGroup()
+
+    
+    function SpawnLib_NumSpawnStreams takes nothing returns integer
+        return totalSpawnStreams
+    endfunction
+    function SpawnLib_NumSpawnSets takes nothing returns integer
+        return totalSpawnSets
+    endfunction
+    function SpawnLib_NumRemaining takes nothing returns integer
+        return totalUnits
+    endfunction
+    function SpawnLib_ForEach takes code c returns nothing
+        ForGroup(livingUnits, c)
+    endfunction
+
+    ///Callback for when spawn sets become empty
+    function SpawnLib_AddEmptiedSpawnSetCallBack takes code c returns nothing
+        TriggerAddAction(callBackTriggerEmptySpawnSet, c)
+    endfunction
+    ///Callback for when units are spawned
+    function SpawnLib_AddSpawnedCallBack takes code c returns nothing
+        TriggerAddAction(callBackTriggerSpawned, c)
+    endfunction
+    private function throwSpawned takes unit u, SpawnSet s returns nothing
+        SpawnLib_TriggeringUnit = u
+        SpawnLib_TriggeringSpawnSet = s
+        TriggerExecute(callBackTriggerSpawned)        
+    endfunction
+    private function throwEmptySpawnSet takes SpawnSet s returns nothing
+        SpawnLib_TriggeringSpawnSet = s
+        TriggerExecute(callBackTriggerEmptySpawnSet)
+    endfunction
+
+    ///A unit to be spawned later
+    interface SpawnBase
+        public method getSpawnSet takes nothing returns SpawnSet
+        public method clone takes nothing returns SpawnBase
+        public method spawn takes nothing returns unit
+    endinterface
+
+    ///Keeps track of units spawned together (for example in the same round or to the same team)
+    struct SpawnSet
+        implement PAM_Property
+        public integer numRemaining = 0
+        private group g = CreateGroup()
+
+        public method ForEach takes code c returns nothing
+            ForGroup(.g, c)
+        endmethod
+
+        ///Add a unit to this set
+        ///Unit's can only be in one spawn set at a time
+        public method addUnit takes unit u returns boolean
+            SpawnSet s
+            if this == 0 or u == null then
+                return false
+            endif
+            
+            //check if unit is already in a set
+            s = SpawnSet[u] 
+            if s == this then
+                return true //already in this set
+            endif
+            if s != 0 then
+                s.removeUnit(u) //can't have units in two sets at once
+            endif
+        
+            //add unit to set
+            SpawnSet[u] = this
+            .numRemaining = .numRemaining + 1
+            totalUnits = totalUnits + 1
+            GroupAddUnit(.g, u)
+            GroupAddUnit(livingUnits, u)
+
+            return true //success
+        endmethod
+
+        ///Remove a unit from this set
+        public method removeUnit takes unit u returns boolean
+            if this == 0 or u == null or SpawnSet[u] != this then
+                return false
+            endif            
+            
+            .numRemaining = .numRemaining - 1
+            totalUnits = totalUnits - 1
+            GroupRemoveUnit(livingUnits, u)
+            GroupRemoveUnit(.g, u)
+            
+            SpawnSet.RemoveKey(u)
+            if .numRemaining <= 0 then
+                throwEmptySpawnSet(this)
+            endif
+            return true
+        endmethod
+
+        public constructor(nothing)
+            totalSpawnSets = totalSpawnSets + 1
+            return this
+        endmethod
+        private method onDestroy takes nothing returns nothing
+            .numRemaining = 0
+            DestroyGroup(.g)
+            .g = null
+            totalSpawnSets = totalSpawnSets - 1
+        endmethod
+    endstruct
+
+    private function LoopSpawn2 takes integer arg returns nothing
+        SpawnStream.LoopSpawn(arg)
+    endfunction
+    
+    //! runtextmacro CreateQuadruplet("PeriodicSpawn", "SpawnStream", "stream", "SpawnBase", "spawn", "integer", "numLeft", "real", "period")
+    
+    ///Queues runners to spawn at the desired frequency
+    private function LoopPeriodicSpawnQueue takes integer periodic_spawn_arg returns nothing
+        Quadruplet_PeriodicSpawn psarg = periodic_spawn_arg
+        SpawnStream this = psarg.stream
+        SpawnBase s = psarg.spawn
+        real period = psarg.period
+        integer numLeft = psarg.numLeft
+        SpawnSet ss
+        psarg.destroy()
+        
+        ss = s.getSpawnSet()
+        if ss != 0 then
+            totalUnits = totalUnits - 1
+            ss.numRemaining = ss.numRemaining - 1
+        endif
+        this.spawn(s)
+        numLeft = numLeft - 1
+        
+        if numLeft > 0 then
+            schedule_integer(Action_integer.LoopPeriodicSpawnQueue, period, Quadruplet_PeriodicSpawn.create(this, s, numLeft, period))
+        else
+            s.destroy()
+        endif
+    endfunction
+    
+    struct SpawnStream
+        private Queue q //(of Spawn)
+        private boolean running = false //set when LoopSpawn is iterating
+        
+        ///Spawns queued runners over time
+        public static method LoopSpawn takes integer arg returns nothing
+            SpawnStream this = SpawnStream(arg)
+            integer i
+            SpawnBase s
+            SpawnSet ss
+            unit u
+            
+            //Stop when there are no more queued
+            if .q.size <= 0 then
+                .running = false
+                return
+            endif
+            
+            //Spawn
+            s = SpawnBase(.q.pop())
+            if s != 0 then
+                u = s.spawn()
+                ss = s.getSpawnSet()
+                if ss != 0 then
+                    totalUnits = totalUnits - 1
+                    ss.numRemaining = ss.numRemaining - 1
+                    if u != null then
+                        ss.addUnit(u)
+                        throwSpawned(u, ss)
+                    endif
+                endif
+                s.destroy()
+            endif
+
+            schedule_integer(Action_integer.LoopSpawn2, MIN_SPAWN_PERIOD, this)
+        endmethod
+
+        ///Spawns a copy of the given spawn
+        public method spawn takes SpawnBase s returns nothing
+            macro_NullGuard()
+            if s == 0 then; return; endif
+            
+            SpawnSet ss
+            
+            //queue the spawn
+            ss = s.getSpawnSet()
+            if ss != 0 then
+                ss.numRemaining = ss.numRemaining + 1
+                totalUnits = totalUnits + 1
+            endif
+            .q.append(integer(s.clone()))
+            
+            //start spawning queued units
+            if not .running then
+                .running = true
+                schedule_integer(Action_integer.LoopSpawn2, 0, this)
+            endif
+        endmethod
+
+        ///Spawns multiple copies of the given spawn, at least period seconds apart
+        public method spawnMultiple takes SpawnBase s, integer num, real period returns nothing
+            macro_NullGuard()
+            if s == 0 then; return; endif
+            if num <= 0 then; return; endif
+            
+            SpawnSet ss
+
+            //spawn the first
+            num = num - 1
+            .spawn(s)
+            if num <= 0 then; return; endif
+            
+            //queue the rest
+            ss = s.getSpawnSet()
+            if ss != 0 then
+                ss.numRemaining = ss.numRemaining + num
+                totalUnits = totalUnits + num
+            endif
+            schedule_integer(Action_integer.LoopPeriodicSpawnQueue, period, Quadruplet_PeriodicSpawn.create(this, s.clone(), num, period))
+        endmethod
+        
+        public static method create takes nothing returns SpawnStream
+            SpawnStream ss = SpawnStream.allocate()
+            ss.q = Queue.create()
+            totalSpawnStreams = totalSpawnStreams + 1
+            return ss
+        endmethod
+        private method onDestroy takes nothing returns nothing
+            totalSpawnStreams = totalSpawnStreams - 1
+        endmethod
+    endstruct
+
+    function SpawnLib_RemoveUnit takes unit u returns nothing
+        SpawnSet[u].removeUnit(u)
+    endfunction
+endlibrary
