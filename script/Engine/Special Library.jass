@@ -1,0 +1,184 @@
+///Contains useful functions just for this map
+library Special requires General, Decal
+    globals
+        constant real TILE_SIZE = 128.0
+        constant integer ABIL_MAX_LIFE_MODIFIER = 'A00X'
+        constant integer MAX_LIFE_MODIFIER_LEVEL = 21
+    endglobals
+
+    //! textmacro CreatePair takes name, type1, name1, type2, name2
+        private struct Pair_$name$
+            readonly $type1$ $name1$
+            readonly $type2$ $name2$
+            public static method create takes $type1$ $name1$, $type2$ $name2$ returns Pair_$name$
+                local Pair_$name$ this = Pair_$name$.allocate()
+                set .$name1$ = $name1$
+                set .$name2$ = $name2$
+                return this
+            endmethod
+            private method onDestroy takes nothing returns nothing
+                set .$name1$ = Pair_$name$(-1).$name1$
+                set .$name2$ = Pair_$name$(-1).$name2$
+            endmethod
+        endstruct
+    //! endtextmacro
+    //! textmacro CreateTriplet takes name, type1, name1, type2, name2, type3, name3
+        private struct Triplet_$name$
+            readonly $type1$ $name1$
+            readonly $type2$ $name2$
+            readonly $type3$ $name3$
+            public static method create takes $type1$ $name1$, $type2$ $name2$, $type3$ $name3$ returns Triplet_$name$
+                local Triplet_$name$ this = Triplet_$name$.allocate()
+                set .$name1$ = $name1$
+                set .$name2$ = $name2$
+                set .$name3$ = $name3$
+                return this
+            endmethod
+            private method onDestroy takes nothing returns nothing
+                set .$name1$ = Triplet_$name$(-1).$name1$
+                set .$name2$ = Triplet_$name$(-1).$name2$
+                set .$name3$ = Triplet_$name$(-1).$name3$
+            endmethod
+        endstruct
+    //! endtextmacro
+    //! textmacro CreateQuadruplet takes name, type1, name1, type2, name2, type3, name3, type4, name4
+        private struct Quadruplet_$name$
+            readonly $type1$ $name1$
+            readonly $type2$ $name2$
+            readonly $type3$ $name3$
+            readonly $type4$ $name4$
+            public static method create takes $type1$ $name1$, $type2$ $name2$, $type3$ $name3$, $type4$ $name4$ returns Quadruplet_$name$
+                local Quadruplet_$name$ this = Quadruplet_$name$.allocate()
+                set .$name1$ = $name1$
+                set .$name2$ = $name2$
+                set .$name3$ = $name3$
+                set .$name4$ = $name4$
+                return this
+            endmethod
+            private method onDestroy takes nothing returns nothing
+                set .$name1$ = Quadruplet_$name$(-1).$name1$
+                set .$name2$ = Quadruplet_$name$(-1).$name2$
+                set .$name3$ = Quadruplet_$name$(-1).$name3$
+                set .$name4$ = Quadruplet_$name$(-1).$name4$
+            endmethod
+        endstruct
+    //! endtextmacro
+
+    function filter_IsAlive takes nothing returns boolean
+        return GetUnitState(GetFilterUnit(), UNIT_STATE_LIFE) > 0
+    endfunction
+    
+    ///Converts an integer to a string of length at most 5 (6 for negative)
+    function cSmallStr takes integer i returns string
+        local integer n = 0
+
+        //n = floor(log_1000(i))
+        loop
+            exitwhen i < 10000 and i > -10000
+            set i = floor(i / 1000.)
+            set n = n + 1
+        endloop
+
+        //append order-of-magnitude character
+        if (n == 0) then
+            return I2S(i)
+        elseif (n == 1) then
+            return I2S(i) + "K"
+        elseif (n == 2) then
+            return I2S(i) + "M"
+        elseif (n == 3) then
+            return I2S(i) + "B"
+        else
+            return I2S(i) + "?"
+        endif
+    endfunction
+
+    ///Creates a nice circle of dying special effects
+    function createCircleEffect takes real x, real y, real r, string model returns nothing
+        local real theta
+        local real dTheta
+        if r < 10 then
+            return //radius is ridiculously small
+        endif
+        
+        //create at least 8 evenly spaced effects
+        set dTheta = 2*bj_PI*RMinBJ(25./r, 1./8)
+        set theta = 0
+        loop
+            exitwhen theta >= bj_PI*2
+            call createBang(x + r*Cos(theta), y + r*Sin(theta), model)
+            set theta = theta + dTheta
+        endloop
+    endfunction
+
+    ////////////
+    // Sets a unit's maximum health to the given value in logarithmic time
+    // NOTE: requires the "Max Life Modifier" ability
+    // NOTE: tops off based on the max level of the ability (about 10 billion hp)
+    ////////////
+    function setUnitMaxHealth takes unit u, integer maxHealth returns boolean
+        local integer dHealth
+        local integer lvl
+        local integer n
+        if u == null or maxHealth <= 0 then
+            return false
+        endif
+
+        //compute the difference and set base level to match sign
+        set dHealth = maxHealth - R2I(GetUnitState(u, UNIT_STATE_MAX_LIFE))
+        if (dHealth >= 0) then
+            set lvl = 3
+        else
+            set lvl = 2
+            set dHealth = -dHealth
+        endif
+
+        //compute the closest smaller power of 10
+        set n = 1
+        loop
+            exitwhen n*10 > dHealth
+            set n = n * 10
+            set lvl = lvl + 2
+        endloop
+        if (lvl > MAX_LIFE_MODIFIER_LEVEL) then
+            return false
+        endif
+
+        //adjust health
+        loop
+            exitwhen dHealth == 0
+
+            //move to smaller powers of 10 as they are needed
+            loop
+                exitwhen n <= dHealth
+                set n = n / 10
+                set lvl = lvl - 2
+            endloop
+
+            //adjust health by current power of 10
+            call UnitAddAbility(u, ABIL_MAX_LIFE_MODIFIER)
+            call SetUnitAbilityLevel(u, ABIL_MAX_LIFE_MODIFIER, lvl)
+            call UnitRemoveAbility(u, ABIL_MAX_LIFE_MODIFIER)
+            set dHealth = dHealth - n
+        endloop
+
+        return true
+    endfunction
+    
+    function KillUnit2 takes unit u returns nothing
+        call KillUnit(u)
+    endfunction
+    function DestroyLightning2 takes lightning ltng returns nothing
+        call DestroyLightning(ltng)
+    endfunction
+    function DestroyEffect2 takes effect e returns nothing
+        call DestroyEffect(e)
+    endfunction
+    
+    function createTimedEffect takes real x, real y, string modelPath, real delay returns nothing
+        call schedule_effect(Action_effect.DestroyEffect2, delay, AddSpecialEffect(modelPath, x, y))
+    endfunction
+    function createTimedAttachedEffect takes widget target, string modelPath, string attachPath, real delay returns nothing
+        call schedule_effect(Action_effect.DestroyEffect2, delay, AddSpecialEffectTarget(modelPath, target, attachPath))
+    endfunction
+endlibrary
