@@ -1,0 +1,191 @@
+///Handles the seller's remorse ability. Records sold tower properties 
+///and reconstructs them when the player casts seller's remorse.
+library RemorseAbilLib initializer initRemorse requires General, Constants, LibDefender
+    constant integer AID_Blizzard = 'A00M'
+    constant integer AID_CriticalStrike = 'A00O'
+    constant integer AID_StormBolt = 'A00H'
+    private Queue array defendersSoldTowerQueues[NUM_DEFENDERS]
+    private constant integer MAX_UNSELLS = 25 //Update tooltip and builder mana when changed 
+    private constant real MAX_UNSELL_TIME = 30.0 //Update tooltip when changed
+    private integer totalSoldTowers = 0
+    
+    function Remorse_NumSoldTowers takes nothing returns integer
+        return totalSoldTowers
+    endfunction
+
+    private struct SoldTower
+        readonly integer ut
+        readonly integer energy
+        readonly real x
+        readonly real y
+        readonly integer time
+        readonly integer skillBlizzard
+        readonly integer skillCriticalStrike
+        readonly integer skillStormBolt
+        readonly integer experience
+        readonly boolean isTower
+
+        ///Creates a SoldTower which records the relevant properties of the given unit
+        public constructor(unit u)
+            assert(u != null)
+                
+            //pass values
+            .ut = GetUnitTypeId(u)
+            .x = GetUnitX(u)
+            .y = GetUnitY(u)
+            .time = Game.time
+            .skillBlizzard = GetUnitAbilityLevel(u, AID_Blizzard)
+            .skillCriticalStrike = GetUnitAbilityLevel(u, AID_CriticalStrike)
+            .skillStormBolt = GetUnitAbilityLevel(u, AID_StormBolt)
+            .experience = GetHeroXP(u)
+            .energy = R2I(GetUnitState(u, UNIT_STATE_MANA))
+            .isTower = Tower[u] != null
+
+            totalSoldTowers += 1
+            return this
+        endmethod
+
+        ///Cleans up properly
+        private method onDestroy takes nothing returns nothing
+            assert(this != 0)
+            totalSoldTowers -= 1
+        endmethod
+    endstruct
+    
+    ///Destroys old sold towers when they time-out
+    private function LoopRemoveTower takes integer defender_arg returns nothing
+        SoldTower s
+        Defender d = defender_arg
+        Queue q = defendersSoldTowerQueues[d.index]
+
+        //Remove timed-out towers from queue
+        loop
+            exitwhen q.size <= 0
+            s = q.peek()
+            exitwhen s.time+MAX_UNSELL_TIME > Game.time //oldest tower isn't timed out
+            q.pop()
+            s.destroy()
+        endloop
+        
+        //Continue
+        if q.size > 0 then
+            schedule_integer(Action_integer.LoopRemoveTower, s.time+MAX_UNSELL_TIME-Game.time, d)
+        endif
+
+        //update builder mana to reflect available towers to unsell
+        SetUnitState(d.builder, UNIT_STATE_MANA, q.size)
+    endfunction
+
+    ///Records towers when they are sold
+    private function OnSell takes nothing returns nothing
+        Defender d = Defender.fromUnit(GetTriggerUnit())
+        Queue q = defendersSoldTowerQueues[d.index]
+        SoldTower s
+        if d == 0 or GetSpellAbilityId() != ABIL_SELL then; return; endif
+
+        //place sold tower in the defender's queue (respecting maximum size)
+        if q.size >= MAX_UNSELLS then
+            s = q.pop()
+            s.destroy()
+        endif
+
+        //create unsell information for tower
+        s = SoldTower.create(GetTriggerUnit())
+        if s == 0 then; return; endif
+
+        q.append(s)
+        if q.size <= 1 then
+            schedule_integer(Action_integer.LoopRemoveTower, MAX_UNSELL_TIME, d)
+        endif
+
+        //update builder mana to reflect available towers to unsell
+        SetUnitState(d.builder, UNIT_STATE_MANA, q.size)
+    endfunction
+
+    ///Unsells towers when Seller's Remorse is cast
+    private function OnCast takes nothing returns nothing
+        Defender d = Defender.fromUnit(GetTriggerUnit())
+        Queue q = defendersSoldTowerQueues[d.index]
+        Tower t
+        SoldTower s
+        unit u
+        if d == 0 or GetSpellAbilityId() != ABIL_UNSELL then; return; endif
+        if q.size <= 0 then
+            DisplayTextToPlayer(d.p,0,0, "No towers to unsell.")
+            return
+        endif
+
+        //get last sold tower
+        s = q.pop()
+        if s == 0 then; return; endif
+
+        //animate where it's trying to unsell
+        createBang(s.x, s.y, "Abilities\\Spells\\Human\\Resurrect\\ResurrectTarget.mdl")
+
+        //check for gold
+        if GetPlayerState(d.p, PLAYER_STATE_RESOURCE_GOLD) < GetFoodMade(s.ut) then
+            DisplayTextToPlayer(d.p,0,0, "|cFFFF0000You need "  + I2S(GetFoodMade(s.ut)) + " gold for that tower.|r")
+            q.append(s)
+            SetUnitState(d.builder, UNIT_STATE_MANA, q.size)
+            return
+        endif
+
+        //check if space is open
+        GroupEnumUnitsInRect(StackGroup(), OneTimeRect(Rect(s.x-TILE_SIZE*0.75, s.y-TILE_SIZE*0.75, s.x+TILE_SIZE*0.75, s.y+TILE_SIZE*0.75)), NO_FILTER)
+        loop
+            u = FirstOfGroup(TopGroup())
+            exitwhen u == null
+            GroupRemoveUnit(TopGroup(), u)
+            if IsUnitType(u, UNIT_TYPE_FLYING) == false and IsUnitAliveBJ(u) == true then
+                PopGroup()
+                u = null
+                DisplayTextToPlayer(d.p,0,0, "|cFFFF0000The tower's spot was not clear.|r")
+                q.append(s)
+                SetUnitState(d.builder, UNIT_STATE_MANA, q.size)
+                return
+            endif
+        endloop
+        PopGroup()
+        u = null
+
+        //rebuild the tower
+        u = CreateUnit(d.p, s.ut, s.x, s.y, bj_UNIT_FACING)
+        if u == null then
+            BJDebugMsg("Map Error: Tried to unsell valid tower and failed. (catchRemorse)")
+            return
+        endif
+        AdjustPlayerStateBJ(-GetFoodMade(s.ut), d.p, PLAYER_STATE_RESOURCE_GOLD)
+        SetUnitState(u, UNIT_STATE_MANA, s.energy)
+        SetHeroXP(u, s.experience, false)
+        integer i
+        loopForIntBelow(i, s.skillBlizzard)
+            SelectHeroSkill(u, AID_Blizzard)
+        endloop
+        loopForIntBelow(i, s.skillCriticalStrike)
+            SelectHeroSkill(u, AID_CriticalStrike)
+        endloop
+        loopForIntBelow(i, s.skillStormBolt)
+            SelectHeroSkill(u, AID_StormBolt)
+        endloop
+        
+        if s.isTower then
+            Tower.create(u)
+        endif
+        s.destroy()
+        u = null
+    endfunction
+
+    ///Initializes seller's remorse
+    private function initRemorse takes nothing returns nothing
+        trigger t
+        
+        //create queues
+        integer i
+        loopForIntBelow(i, NUM_DEFENDERS)
+            defendersSoldTowerQueues[i+1] = Queue.create()
+        endloop
+        
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_SPELL_CAST, function OnSell)
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_SPELL_FINISH, function OnCast)
+    endfunction
+endlibrary
