@@ -1,0 +1,254 @@
+function createMapInfoQuests takes nothing returns nothing
+    quest q
+    string s
+    
+    //Summary
+    q = CreateQuest()
+    QuestSetRequired(q, true)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\WorldEditUI\\Doodad-Cliff.blp")
+    QuestSetTitle(q, "Map Summary")
+    s = ""
+    s += "You can email Strilanc at |cFFFFCC00craig.gidney@gmail.com|r\n"
+    s += "Note: use a descriptive email title or it might be deleted as spam."
+    QuestSetDescription(q, s)
+    CreateQuestItemBJ(q, "|cFFFFCC00Author:|r Strilanc")
+    CreateQuestItemBJ(q, "|cFFFFCC00Minimap:|r Silveri3ullet")
+    CreateQuestItemBJ(q, "|cFFFFCC00New/Clean versions:|r epicwar.com|r")
+
+    //How to Play
+    q = CreateQuest()
+    QuestSetRequired(q, true)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\CommandButtons\\BTNSelectHeroOn.blp")
+    QuestSetTitle(q, "How to Play")
+    s = ""
+    s += "|cFFFFCC00What is power?|r\n"
+    s += "Power (or energy) is mana. All towers except the basic arrow tower need it to be effective. It must be created by generators (water wheel, furnace) and transfered to your combat towers.\n"
+    s += "\n"
+    s += "|cFFFFCC00How do I use it?|r\n"
+    s += "Here is a simple example of how you can power a Tesla Coil using a Furnace:\n"
+    s += "Step 1 - Pick a spot with lots of grass for a furnace to burn\n"
+    s += "Step 2 - Build a furnace and Tesla Coil close together on this spot\n"
+    s += "Step 3 - Select the furnace and cast 'Add Transfer Target' on the Tesla Coil\n"
+    s += "Your tesla coil will now receive mana from the furnace and use it to cast chain lightning.\n"
+    QuestSetDescription(q, s)
+    CreateQuestItemBJ(q, "What is power?")
+    CreateQuestItemBJ(q, "How do I use it?")
+
+    //Commands and modes
+    q = CreateQuest()
+    QuestSetRequired(q, true)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\CommandButtons\\BTNCrate.blp")
+    QuestSetTitle(q, "Commands and Modes")
+    s = ""
+    s += "Modes can be entered before the first round starts:" + "\n"
+    s += "-race: Rounds can be jumpstarted and first one done wins." + "\n"
+    s += "-war: Players get a barracks which can summon runners." + "\n"
+    s += "-rush: Next round starts when any player finishes instead of waiting for all." + "\n"
+    s += "\n"
+    s += "-solo: No teams." + "\n"
+    s += "-corner: Players team up by side." + "\n"
+    s += "-side: Players team up by corner." + "\n"
+    s += "-coop: All players team up." + "\n"
+    s += "\n"
+    s += "-killer: Bounty given to whoever kills the runner." + "\n"
+    s += "-fair: Default. Bounty given to whoever spawned the runner." + "\n"
+    s += "-inherit: Round bounty for missing players goes to the team." + "\n"
+    s += "\n"
+    s += "-noob: Easiest difficulty." + "\n"
+    s += "-rookie: Pretty easy difficulty." + "\n"
+    s += "-hotshot: Default. Medium difficulty." + "\n"
+    s += "-veteran: Kinda hard difficulty." + "\n"
+    s += "-elite: Hard difficulty." + "\n"
+    s += "-psycho: Very hard difficulty." + "\n"
+    s += "\n"    
+    s += "-rounds=#: Sets number of rounds to #. Default 15. Max 50." + "\n"
+    s += "-endless: Rounds never stop." + "\n"
+    s += "-lastman: Rounds stop when only one team is left." + "\n"
+    s += "\n"    
+    s += "-suddendeath: Sets numver of lives to 1." + "\n"
+    s += "-lives=#: Sets number of lives to #. Default 25. Max 50." + "\n"
+    s += "\n"
+    s += "-tech: Allows early access to all towers. Not recommended around new players." + "\n"
+    s += "\n"
+    s += "\nAbreviated Commands:"
+    s += "Use the -- prefix for abreviated commands. Each character after -- represents a full command." + "\n"
+    s += "HostBots can enter these types of commands using the HCL library." + "\n"
+    s += "\n"
+    s += "a:race, c:coop, d:endless, e:elite, h:hotshot, i:inherit, k:killer, j:lives=1, L:lives=10, m:lastman, "
+    s += "n:noob, o:corner, p:psycho, r:rookie, s:side, t:tech, u:rush, v:veteran=1, w:war, y:rounds=30"
+    QuestSetDescription(q, s)
+    CreateQuestItemBJ(q, "|cFFFFCC00-ready|r: Indicates you want to start the next round.")
+    CreateQuestItemBJ(q, "|cFFFFCC00-boot|r player: Votes to boot players.")
+    CreateQuestItemBJ(q, "|cFFFFCC00-block|r player, |cFFFFCC00-unblock|r player: Stops players from building near you.")
+
+    //Factoids
+    q = CreateQuest()
+    QuestSetRequired(q, true)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\WorldEditUI\\Doodad-Prop.blp")
+    QuestSetTitle(q, "Factoids")
+    s = ""
+    s += "|cFFFFCC00Special Rounds|r\n"
+    s += "Round 5: Speedy\n"
+    s += "Round 10: Feedback\n"
+    s += "Round 15: Speedy + Feedback\n"
+    s += "Round 20: Shield\n"
+    s += "Round 25: Speedy + Shield\n"
+    s += "Round 30: Speedy + Feedback + Shield\n"
+    s += "Multiples of 5 past 30: Speedy + Feedback + Shield\n"
+    s += "\n"
+    s += "|cFFFFCC00Leaderboard Columns|r\n"
+    s += "|cFFC3DBFFAvail|rable = Total mana available across all towers\n"
+    s += "|cFFC3DBFFProduc|rtion = Mana generated by all generators per second\n"
+    s += "|cFFC3DBFFDrain|r = Mana consumed per second by your towers when they are all attacking\n"
+    s += "\n"
+    s += "|cFFFFCC00Energy Stream Colors|r\n"
+    s += "|cFFFF8000Orange|r = No energy transfered last second\n"
+    s += "|cFF00FF00Green|r = 1 to 24 Joules transfered last second\n"
+    s += "|cFF0000FFBlue|r = 25 to 124 Joules transfered last second\n"
+    s += "|cFFFFCC00Yellow|r = 125 to 624 Joules transfered last second\n"
+    s += "White = 625 or more Joules transfered last second\n"
+    s += "\n"
+    s += "|cFFFFCC00Measurements|r\n"
+    s += "1 Joule = 1 mana\n"
+    s += "1 Watt = 1 mana per second\n"
+    QuestSetDescription(q, s)
+    CreateQuestItemBJ(q, "Special Rounds")
+    CreateQuestItemBJ(q, "Leaderboard Columns")
+    CreateQuestItemBJ(q, "Energy Stream Colors")
+    CreateQuestItemBJ(q, "Measurements")
+        
+    //Effective Powering
+    q = CreateQuest()
+    QuestSetRequired(q, true)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\WorldEditUI\\Editor-Random-Unit.blp")
+    QuestSetTitle(q, "Effective Powering")
+    s = ""
+    s += "|cFFFFCC00What you want|r\n"
+    s += "The only thing that really matters is whether or not your combat towers have the power they need when they need it. If your combat towers run out of power, they will become very dark, and do a lot less damage. If you fail to power them for a long time, you WILL lose. If your combat towers aren't dark, you are currently fine.\n"
+    s += "\n"
+    s += "|cFFFFCC00How you get it|r\n"
+    s += "- Pay attention to the leaderboard. Make sure you are producing enough energy to deal with the drain when your combat towers are firing. Note that you can have more drain than production, as long as you have time to charge between rounds.\n"
+    s += "- Pay attention to how the energy is actually being distributed. Even if you are producing enough energy, it may not be able to make it to your combat towers fast enough. Make sure your bridging towers are good enough. A good indicator of bad distribution is a fully-charged generator during the round: that means it is making energy faster than energy is leaving it.\n"
+    QuestSetDescription(q, s)
+    CreateQuestItemBJ(q, "What you want")
+    CreateQuestItemBJ(q, "How you get it")
+    
+    //Credit
+    q = CreateQuest()
+    QuestSetRequired(q, true)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\WorldEditUI\\Editor-MultipleUnits.blp")
+    QuestSetTitle(q, "Credit")
+    s = ""
+    s += "|cFFFFCC00Maps|r\n"
+    s += "Cube Defense 4.8: The main influence for the terrain and philosophy in this map. Great map for mazing.\n"
+    s += "|cFFFFCC00Content Creators|r\n"
+    s += "- Silver_13ullet: The minimap preview\n"
+    s += "- Big Dub @ HiveWorkshop.com: Power transfer icons\n"
+    s += "\n"
+    s += "|cFFFFCC00Groups|r\n"
+    s += "- The community at wc3c.net\n"
+    s += "- A lot of people who joined test run games and helped, thanks!\n"
+    s += "\n"
+    s += "|cFFFFCC00People|r\n"
+    s += "- Ranakastrasz for serious bug finding\n"
+    s += "- Antistone for suggestions and bug finds\n"
+    s += "- Storm_Surge for testing\n"
+    s += "- North_Titan for testing\n"
+    s += "- the_lost_hero1 for testing\n"
+    s += "- Dragon451 for testing. A lot of testing.\n"
+    s += "- Mtg22 for suggestions, testing, and lots of hosting help.\n"
+    s += "- the_lost_hero1 for suggestions and testing.\n"
+    s += "- Mordacity for suggestions and testing.\n"
+    s += "- Don-Para- for testing\n"
+    s += "- Mytiq for locating a nasty bug\n"
+    s += "- Various other names that I can't remember because there are so many.\n"
+    QuestSetDescription(q, s)
+    CreateQuestItemBJ(q, "Maps")
+    CreateQuestItemBJ(q, "Groups")
+    CreateQuestItemBJ(q, "People")
+    
+    //History
+    q = CreateQuest()
+    QuestSetRequired(q, true)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\CommandButtons\\BTNSpy.blp")
+    QuestSetTitle(q, "History")
+    s = ""
+    s += "|cFFFFCC00v1.27b to v1.31|r\n"
+    s += "- Fixed several serious bugs (incorrect costs, ability ids, leaks, etc, etc)\n"
+    s += "- Minor balance changes"
+    s += "- Other things I don't remember"
+    s += "|cFFFFCC00v1.27 to v1.27b|r\n"
+    s += "- Tweaked bottleneck detection\n"
+    s += "- Big rewrite\n"
+    s += "|cFFFFCC00v1.25b to v1.27|r\n"
+    s += "- Added Far Transfer ability to bridging towers\n"
+    s += "- Added bottleneck detection\n"
+    s += "- Switched from menus to text commands\n"
+    s += "- Added support for MMD and HCL\n"
+    s += "- Replaced basic arrow tower with wall tower\n"
+    s += "- Nerfed rock and chem, buffed tesla\n"
+    s += "|cFFFFCC00v1.25 to v1.25b|r\n"
+    s += "- Fixed a no-spawn bug when the last player with runners died or left\n"
+    s += "|cFFFFCC00v1.24 to v1.25|r\n"
+    s += "- Replaced clock tower with locust tower\n"
+    s += "- Nerfed chemical tower\n"
+    s += "- Buffed hero tower\n"
+    s += "- Improved war mode\n"
+    s += "- No bounty before completing rounds in race and rushed\n"
+    s += "- Removed training mode\n"
+    s += "- Added Psycho difficulty\n"
+    s += "- Reworked tutorial\n"
+    s += "- Lots of optimizations and bug fixes\n"
+    s += "\n"
+    s += "|cFFFFCC00v1.21 to v1.24|r\n"
+    s += "- Fixed a few major bugs\n"
+    s += "- Fixed sharing to allow building and upgrading\n"
+    s += "- Added new modes\n"
+    QuestSetDescription(q, s)
+    
+    //History 2
+    q = CreateQuest()
+    QuestSetRequired(q, true)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\CommandButtons\\BTNSpy.blp")
+    QuestSetTitle(q, "History 2")
+    s = ""
+    s += "|cFFFFCC00v1.20 to v1.21|r\n"
+    s += "- Added more options at start\n"
+    s += "- Added elemental arrow towers\n"
+    s += "- Added Seller's Remorse\n"
+    s += "- Nerfed tsunami and hero\n"
+    s += "- Large rewrite of script\n"
+    s += "- Lots of minor fixes and improvements\n"
+    s += "\n"
+    s += "|cFFFFCC00v1.10 to v1.20|r\n"
+    s += "- Continued to adjust difficulty and towers\n"
+    s += "- Added challenges\n"
+    s += "- Added hero and tsunami towers\n"
+    s += "- Fine tuned tutorial\n"
+    s += "- Various minor fixes and improvements\n"
+    s += "\n"
+    s += "|cFFFFCC00v1.00 to v1.10|r\n"
+    s += "- Adjusted Difficulty (a lot)\n"
+    s += "- Added Special Rounds (speedy, feedback, shield)\n"
+    s += "- Added 'Training' Mode\n"
+    s += "- Removed Aura Towers\n"
+    s += "- Added alternate builder with new towers\n"
+    s += "- Added tutorial system\n"
+    s += "- Fixed gold bug\n"
+    s += "- Various minor fixes and improvements\n"
+    QuestSetDescription(q, s)
+endfunction
+
+function InitTrig_Map_Info takes nothing returns nothing
+    trigger t = CreateTrigger()
+    TriggerRegisterTimerEvent(t, 0, false)
+    TriggerAddAction(t, function createMapInfoQuests)
+endfunction
