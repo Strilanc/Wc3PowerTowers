@@ -1,0 +1,7 @@
+library UnitSwarmTower initializer init requires DataCreation
+    private ShortList uids
+    private function init takes nothing returns nothing
+        uids = ShortList.create6('h00D', 'h00H', 'h01G', 'h01H', 'h01J', 'h01I')
+        CreateCombatSetData(uids, AttackCastType_Instant, 'A008', OrderId("waterelemental"))
+    endfunction
+endlibrary
