@@ -1,0 +1,145 @@
+library libCommandBoot initializer init requires General, Constants, LibDefender
+    //time before vote expires
+    private constant real VoteDuration = 60.0 //seconds    
+    
+    //Special actions to perform before a player is booted
+    private function BeforeBoot takes player target returns nothing
+        //Boot the player by causing a split
+        print(getPlayerColoredName(target) + " has been split into a separate game.")
+        if target != GetLocalPlayer() then
+            Defender[target].kill()
+        endif
+    endfunction
+    
+    //Determines if/how a player can be booted
+    private constant integer BootByAnyone = 0
+    private constant integer BootByStrictMajority = 1
+    private constant integer BootImmune = 2
+    private function GetPlayerBootableType takes player p returns integer
+        //only defenders may be booted
+        if GetPlayerId(p) >= 8 then; return BootImmune; endif
+        
+        //computer defenders can be booted by anyone at any time
+        if GetPlayerController(p) == MAP_CONTROL_COMPUTER then; return BootByAnyone; endif
+        
+        return BootByStrictMajority
+    endfunction
+    
+    private function GetPlayerFromString takes string text returns player
+        return Defender.fromString(text).p
+    endfunction
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    
+    private integer array voteCounts
+    private boolean array voteMatrix
+
+    private function GetMatrixIndex takes player voter, player target returns integer
+        assert(voter != null)
+        assert(target != null)
+        return GetPlayerId(voter)*12 + GetPlayerId(target)
+    endfunction
+    
+    ///Returns true if 'voter' has a vote to boot 'target'
+    private function PlayerWantsToBootPlayer takes player voter, player target returns boolean
+        assert(voter != null)
+        assert(target != null)
+        return voteMatrix[GetMatrixIndex(voter, target)]
+    endfunction
+    
+    ///Returns the number of votes to boot a player
+    private function GetTargetVoteCount takes player target returns integer
+        assert(target != null)
+        return voteCounts[GetPlayerId(target)]
+    endfunction
+    
+    ///Sets voter's vote to boot target; maintains vote counts
+    private function SetVote takes player voter, player target, boolean wantsToBoot returns nothing
+        assert(voter != null)
+        assert(target != null)
+        
+        integer i = GetMatrixIndex(voter, target)
+        if voteMatrix[i] == wantsToBoot then; return; endif
+        
+        voteMatrix[i] = wantsToBoot
+        if wantsToBoot then
+            voteCounts[GetPlayerId(target)] += 1
+        else
+            voteCounts[GetPlayerId(target)] -= 1
+        endif
+    endfunction
+
+    ///Expires a vote
+    //! runtextmacro CreatePair("vote", "player", "voter", "player", "target")
+    private function ExpireVote takes integer vote_arg returns nothing
+        Pair_vote vote = vote_arg
+        player voter = vote.voter
+        player target = vote.target
+        vote.destroy()
+        assert(voter != null)
+        assert(target != null)
+        
+        if GetPlayerSlotState(target) != PLAYER_SLOT_STATE_PLAYING then; return; endif
+        print(getPlayerColoredName(voter) + "'s vote to boot " + getPlayerColoredName(target) + " has expired.")
+        SetVote(voter, target, false)
+    endfunction
+
+    ///Records a vote by 'voter' to boot 'target'
+    private function Vote takes player voter, player target returns nothing
+        assert(voter != null)
+        assert(target != null)
+        
+        if GetPlayerSlotState(target) != PLAYER_SLOT_STATE_PLAYING then; return; endif
+        if voter == target then; return; endif
+        
+        //Place the Vote
+        if voteMatrix[GetMatrixIndex(voter, target)] then
+            DisplayTextToPlayer(voter, 0, 0, "You already have a vote to boot " + getPlayerColoredName(target) + ".")
+            return
+        endif
+        SetVote(voter, target, true)
+        print(getPlayerColoredName(voter) + " has voted to boot " + getPlayerColoredName(target) + ". (" + I2S(voteCounts[GetPlayerId(target)]) + " votes)")
+        
+        //Check if the target should be booted
+        boolean shouldBoot = false
+        integer t; t = GetPlayerBootableType(target)
+        if t == BootByAnyone then
+            shouldBoot = voteCounts[GetPlayerId(target)] > 0
+        elseif t == BootByStrictMajority then
+            integer i
+            integer n = 0
+            loopForIntBelow(i, 12)
+                if GetPlayerController(Player(i)) == MAP_CONTROL_USER and GetPlayerSlotState(Player(i)) == PLAYER_SLOT_STATE_PLAYING then
+                    n += 1
+                endif
+            endloop
+            shouldBoot = voteCounts[GetPlayerId(target)] > n/2
+        else
+            assert(t == BootImmune)
+        endif
+        
+        //Perform
+        if shouldBoot then
+            //Boot the player
+            BeforeBoot(target)
+        else
+            //Schedule the vote's expiration
+            schedule_integer(Action_integer.ExpireVote, VoteDuration, Pair_vote.create(voter, target))
+        endif
+    endfunction
+
+    private function OnCommand takes nothing returns nothing
+        string text = StringCase(GetEventPlayerChatString(), false)
+        if SubString(text, 0, 6) != "-boot " and SubString(text, 0, 6) != "-kick " then; return; endif
+        
+        player target; target = GetPlayerFromString(SubString(text, 6, StringLength(text)))
+        if target == null then; return; endif
+        
+        Vote(GetTriggerPlayer(), target)
+    endfunction
+
+    private function init takes nothing returns nothing
+        AddChatEventHandler("-boot ", false, function OnCommand)
+        AddChatEventHandler("-kick ", false, function OnCommand)
+    endfunction
+endlibrary
