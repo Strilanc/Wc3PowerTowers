@@ -1,0 +1,7 @@
+library UnitHolyTower initializer init requires DataCreation
+    private ShortList uids
+    private function init takes nothing returns nothing
+        uids = ShortList.create6('h030', 'h031', 'h032', 'h033', 'h034', 'h035')
+        CreateCombatSetData(uids, AttackCastType_Point, 'A00K', OrderId("carrionswarm"))
+    endfunction
+endlibrary
