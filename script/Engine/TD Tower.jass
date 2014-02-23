@@ -1,0 +1,73 @@
+library TDTower initializer init uses TowerDatabase
+    constant integer AID_NotPowerTower = 'A00P'
+    ///Undoes mana scaling with max mana change
+    private function OnMaxManaChange takes nothing returns nothing
+        Tower t = Tower[GetTriggerUnit()]
+        if t != 0 then; t.SetEnergy(t.lastEnergy); endif
+    endfunction
+    
+    ///Refund cost and fix any missing death animations
+    private function OnDeath takes nothing returns nothing
+        unit u = GetTriggerUnit()
+        player owner = GetOwningPlayer(u)
+
+        //refund cost
+        integer dGold; dGold = R2I(GetUnitFoodMade(u) * SELL_PERCENTAGE)
+        if dGold > 0 and GetPlayerSlotState(owner) == PLAYER_SLOT_STATE_PLAYING then
+            integer gold; gold = dGold + GetPlayerState(owner, PLAYER_STATE_RESOURCE_GOLD)
+            SetPlayerState(owner, PLAYER_STATE_RESOURCE_GOLD, gold)
+            showUnitTextToPlayer(u, "|cFFFFCC00+" + I2S(dGold) + "|r", owner)            
+        endif
+
+        //show death animation if none present
+        TowerData td; td = TowerData[GetUnitTypeId(u)]
+        if td != 0 and not td.hasDeathAnimation then
+            createBang(GetUnitX(u), GetUnitY(u), "Abilities\\Weapons\\Mortar\\MortarMissile.mdl")
+            ShowUnit(u, false)
+        endif
+        
+        set u = null
+        set owner = null
+    endfunction
+    
+    private function OnStartBuild takes nothing returns nothing
+        AWALL_AddTower(GetTriggerUnit())
+        
+        if GetUnitAbilityLevel(GetTriggerUnit(), AID_NotPowerTower) == 0 then
+            local TowerData td; td = TowerData[GetUnitTypeId(GetTriggerUnit())]
+            if td != 0 then
+                call SetUnitAbilityLevel(GetTriggerUnit(), td.abilityId, td.level)
+            endif
+            
+            local Tower t; t = Tower.create(GetTriggerUnit())
+            if t.data.production > 0 then
+                SetPlayerTechResearched(GetOwningPlayer(GetTriggerUnit()), RESEARCH_GENERATOR, 1)
+            endif
+        endif
+    endfunction
+
+    private function OnUpgrade takes nothing returns nothing
+        unit u = GetTriggerUnit()
+        if Tower[u] == 0 then; Tower.create(u); endif
+        
+        local TowerData td; td = TowerData[GetUnitTypeId(u)]
+        if td != 0 then; call SetUnitAbilityLevel(u, td.abilityId, td.level); endif
+        
+        IssueImmediateOrder(u, "stop") //avoid lock-up [necessary?? sufficient?? not sure]
+        u = null
+    endfunction
+
+    private function init takes nothing returns nothing
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_UPGRADE_START, function OnMaxManaChange)
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function OnMaxManaChange)
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_UPGRADE_CANCEL, function OnMaxManaChange)
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function OnMaxManaChange)
+        AddUnitEventHandler(EVENT_PLAYER_HERO_LEVEL, function OnMaxManaChange)
+        
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_DEATH, function OnDeath)
+
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_CONSTRUCT_START, function OnStartBuild)
+        
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function OnUpgrade)
+    endfunction
+endlibrary
