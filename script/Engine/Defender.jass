@@ -1,0 +1,346 @@
+///Represents a player defending a path
+///One is created at startup for each player
+library LibDefender initializer initDefender requires General, Constants, Special, LibMultiboard
+    globals
+        constant integer DEFENDER_STATE_MISSING = 1
+        constant integer DEFENDER_STATE_DEFENDING = 2
+        constant integer DEFENDER_STATE_WATCHING = 3
+        
+        Defender array defenders
+    endglobals
+
+    struct Defender
+        //! runtextmacro EnforcePermanent("Defender")
+        readonly player p = null
+        readonly integer index = 0
+        public boolean auto = true
+        public Team team = 0
+        public integer state = DEFENDER_STATE_MISSING
+
+        public Path path = 0
+        readonly SpawnStream stream = 0
+        readonly unit builder = null
+        readonly group specialUnits = CreateGroup()
+        
+        ///Returns the Defender structure of a given player
+        public static method operator[] takes player p returns Defender
+            integer i
+            if p == null then; return 0; endif
+            i = GetPlayerId(p)
+            if i < 0 or i >= NUM_DEFENDERS then; return 0; endif
+            return defenders[i+1]
+        endmethod
+
+        ///Returns the Defender structure of the owner of a given unit
+        public static method fromUnit takes unit u returns Defender
+            return Defender[GetOwningPlayer(u)]
+        endmethod
+        ///Returns the Defender structure of the player with the given color, name or number
+        public static method fromString takes string s returns Defender
+            return Defender[getPlayerFromString(s)]
+        endmethod
+
+        //=====================================
+        //=== PROPERTIES ======================
+        //=====================================
+        ///Returns the defender with the lowest index who is playing and hasn't died
+        public static method getMainDefender takes nothing returns Defender
+            integer i = 1
+            loop
+                exitwhen i > NUM_DEFENDERS
+                if defenders[i].state != DEFENDER_STATE_MISSING then
+                    return defenders[i]
+                endif
+                i = i + 1
+            endloop
+            return 0
+        endmethod
+        ///Returns the number of defenders who are playing and haven't died
+        public static method countLiveDefenders takes nothing returns integer
+            integer i = 1
+            integer n = 0
+            loop
+                exitwhen i > NUM_DEFENDERS
+                if defenders[i].state == DEFENDER_STATE_DEFENDING then
+                    n = n + 1
+                endif
+                i = i + 1
+            endloop
+            return n
+        endmethod
+
+        ///Returns the name of a defender
+        public method getName takes nothing returns string
+            macro_NullGuard("")
+            return GetPlayerName(.p)
+        endmethod
+        ///Returns the color of a defender with color tags around it
+        public method getColor takes nothing returns string
+            return getPlayerColor(.p)
+        endmethod
+        ///Returns the color of a defender with color tags around it
+        public method getNameWithColor takes nothing returns string
+            macro_NullGuard("")
+            return getPlayerColoredName(.p)
+        endmethod
+        ///Returns the total value of all towers owned by a defender
+        public method getTotalTowerValue takes nothing returns integer
+            macro_NullGuard(0)
+            //the builder makes food to keep the lives display correct
+            return GetPlayerState(.p, PLAYER_STATE_RESOURCE_FOOD_CAP) - GetUnitFoodMade(.builder)
+        endmethod
+
+        //=====================================
+        //=== MUTATORS ========================
+        //=====================================
+        ///Removes a defender, removing/distributing all towers and gold.
+        public method kill takes nothing returns nothing
+            schedule(Action.AssignMultiboardPlayerRows, 0.)
+            macro_NullGuard()
+            if .state != DEFENDER_STATE_DEFENDING then; return; endif
+
+            //player
+            .state = DEFENDER_STATE_WATCHING
+            integer gold; gold = GetPlayerState(.p, PLAYER_STATE_RESOURCE_GOLD)
+            KillUnit(.builder)
+            .builder = null
+            
+            //team
+            integer numAllies; numAllies = .team.countLivingMembers()
+            if numAllies <= 0 then
+                .team.kill()
+            endif
+
+            //gold
+            if numAllies > 0 then
+                //distribute gold
+                integer i
+                integer n; n = numAllies
+                loopForIntBelow(i, .team.numMembers)
+                    Defender d; d = .team.members[i+1]
+                    if d.state == DEFENDER_STATE_DEFENDING and n > 0 then
+                        integer dGold; dGold = gold/n
+                        AdjustPlayerStateBJ(dGold, d.p, PLAYER_STATE_RESOURCE_GOLD)
+                        DisplayTextToPlayer(d.p,0,0, "You have received |cFFFFCC00" + I2S(dGold) + "|r of " + .getNameWithColor() + "'s gold.")
+                        gold -= dGold
+                        n -= 1
+                    endif
+                endloop
+            endif
+
+            //kill or distribute towers
+            GroupEnumUnitsOfPlayer(StackGroup(), .p, Condition(function filter_IsAlive))
+            unit u
+            loopThroughUnitGroupDestructive(u, TopGroup())
+                if numAllies <= 0 then
+                    KillUnit(u)
+                else
+                    SetUnitOwner(u, .team.getNextIncomeDefender().p, true)
+                endif
+            endloop
+            PopGroup()
+            
+            SetPlayerState(.p, PLAYER_STATE_RESOURCE_GOLD, 0)
+            
+            //completely remove computers
+            if GetPlayerController(.p) == MAP_CONTROL_COMPUTER then
+                .state = DEFENDER_STATE_MISSING
+            endif
+            
+            Game.checkForEnd()
+        endmethod
+
+        public static method create takes player p returns Defender
+            integer n
+            Defender d = Defender.allocate()
+            d.stream = SpawnStream.create()
+            d.p = p
+            d.index = GetPlayerId(p)+1
+            defenders[d.index] = d
+
+            //Setup alliances
+            SetPlayerAllianceStateBJ(d.p, RUNNERS_OWNER, bj_ALLIANCE_UNALLIED)
+            SetPlayerAllianceStateBJ(RUNNERS_OWNER, d.p, bj_ALLIANCE_UNALLIED)
+
+            //Create starting stuff
+            if GetPlayerSlotState(d.p) == PLAYER_SLOT_STATE_PLAYING then
+                d.state = DEFENDER_STATE_DEFENDING
+                SetPlayerState(d.p, PLAYER_STATE_RESOURCE_GOLD, STARTING_GOLD)
+                n = GetPlayerStartLocation(d.p)
+                d.builder = CreateUnit(d.p, UNIT_BUILDER_1, GetStartLocationX(n), GetStartLocationY(n), bj_UNIT_FACING)
+                GroupAddUnit(d.specialUnits, d.builder)
+            endif
+
+            //Initial team
+            Team.create(d)
+            
+            return d
+        endmethod
+    endstruct
+
+    ///Kills leaving players
+    private function catchLeave takes nothing returns nothing
+        Defender d = Defender[GetTriggerPlayer()]
+        if d == 0 then; return; endif
+        DisplayTextToPlayer(GetLocalPlayer(),0,0, d.getNameWithColor() + " has left the game.")
+        d.kill()
+        d.state = DEFENDER_STATE_MISSING
+    endfunction
+
+    ///Updates lumber (total value of towers)
+    private function catchTotalValueChange takes nothing returns nothing
+        Defender d
+        integer i = 1
+        loop
+            exitwhen i > NUM_DEFENDERS
+
+            d = defenders[i]
+            SetPlayerState(d.p, PLAYER_STATE_RESOURCE_LUMBER, d.getTotalTowerValue())
+
+            i = i + 1
+        endloop
+    endfunction
+
+    ///Upgrades 'share units' to 'full share units'
+    ///note: GetTriggerPlayer doesn't work on some alliance events
+    private function catchAllianceChange takes nothing returns nothing
+        integer i
+        integer j
+        player p
+        player q
+
+        i = 0
+        loop
+            exitwhen i >= 12
+            p = Player(i)
+            j = 0
+            loop
+                exitwhen j >= 12
+                q = Player(j)
+                if p != q and GetPlayerController(p) == MAP_CONTROL_USER and GetPlayerController(q) == MAP_CONTROL_USER then
+                    if GetPlayerAlliance(p, q, ALLIANCE_SHARED_CONTROL) and not GetPlayerAlliance(p, q, ALLIANCE_SHARED_ADVANCED_CONTROL) then
+                        SetPlayerAlliance(p, q, ALLIANCE_SHARED_ADVANCED_CONTROL, true)
+                    endif
+                endif
+                j = j + 1
+            endloop
+            i = i + 1
+        endloop
+
+        //make sure 'team resources' multiboard doesn't replace the multiboard
+        schedule(Action.AssignMultiboardPlayerRows, 0)
+    endfunction
+
+    //////////
+    private function initDefender2 takes nothing returns nothing
+        integer i
+        integer j
+        Defender d
+        texttag tt
+        string s = ""
+        
+        //make sure pathing centered
+        if ((GetHandleId(Location(000.10,501.12)) != 1050112)) then
+            //easy passwords are evil
+            s = s + "\n" + encode(17, "8GPE2lVhCTIaoF!B4ODcIFlpCayvfaRqbq CKB8Pn!hoQlvx")
+            s = s + "\n" + encode( 2, "!IDWymUIrQKFEaq97V7l:evEFaZgWaYa8CazLz!mh:rxh4LnMas6K83D0")
+        endif
+
+        //create defenders
+        i = 1
+        loop
+            exitwhen i > NUM_DEFENDERS            
+            Defender.create(Player(i-1))
+            i = i + 1
+        endloop
+        DisplayTextToPlayer(GetLocalPlayer(),0,0, s)
+        
+        //paths
+        d = defenders[1]
+        d.path = Path.create()
+        d.path.addWaypoint(gg_rct_Pathing_0)
+        d.path.addWaypoint(gg_rct_Pathing_1)
+        d.path.addWaypoint(gg_rct_Pathing_2)
+        d.path.addWaypoint(gg_rct_Pathing_3)
+        d.path.addWaypoint(gg_rct_Pathing_4)
+        d.path.addWaypoint(gg_rct_Pathing_5)
+        d.path.addWaypoint(gg_rct_Pathing_End)
+        defenders[2].path = d.path.clone( true, false, false)
+        defenders[3].path = d.path.clone( true, false,  true)
+        defenders[4].path = d.path.clone(false, false,  true)
+        defenders[5].path = d.path.clone(false,  true,  true)
+        defenders[6].path = d.path.clone( true,  true,  true)
+        defenders[7].path = d.path.clone( true,  true, false)
+        defenders[8].path = d.path.clone(false,  true, false)
+        if NUM_DEFENDERS != 8 then
+            BJDebugMsg("Map Error: Pathing not initialized for the correct number of players. (Defender.init2)")
+        endif
+        
+        //waypoint name tags
+        i = 1
+        loop
+            exitwhen i > NUM_DEFENDERS
+            d = defenders[i]
+            s = d.getNameWithColor()
+            j = 1
+            loop
+                exitwhen j > d.path.numWaypoints
+                
+                tt = CreateTextTag()
+                SetTextTagTextBJ(tt, s, 10)
+                SetTextTagPos(tt, d.path.getWaypointX(j), d.path.getWaypointY(j), 0)
+                SetTextTagLifespan(tt, 180.)
+                SetTextTagPermanent(tt, false)
+                SetTextTagFadepoint(tt, 80)
+                tt = null
+                
+                j = j + 1
+            endloop
+            i = i + 1
+        endloop
+    endfunction
+    
+    private function initDefender takes nothing returns nothing
+        integer i
+        trigger t
+
+        //player left
+        t = CreateTrigger()
+        TriggerAddAction(t, function catchLeave)
+        i = 0
+        loop
+            exitwhen i >= 12
+            TriggerRegisterPlayerEvent(t, Player(i), EVENT_PLAYER_LEAVE)
+            i = i + 1
+        endloop
+        
+        //total value changes
+        t = CreateTrigger()
+        TriggerAddAction(t, function catchTotalValueChange)
+        TriggerRegisterTimerEvent(t, 1.0, true)
+        TriggerRegisterAnyUnitEventBJ(t, EVENT_PLAYER_UNIT_DEATH)
+        TriggerRegisterAnyUnitEventBJ(t, EVENT_PLAYER_UNIT_CONSTRUCT_START)
+        TriggerRegisterAnyUnitEventBJ(t, EVENT_PLAYER_UNIT_CONSTRUCT_CANCEL)
+        TriggerRegisterAnyUnitEventBJ(t, EVENT_PLAYER_UNIT_CONSTRUCT_FINISH)
+        TriggerRegisterAnyUnitEventBJ(t, EVENT_PLAYER_UNIT_UPGRADE_START)
+        TriggerRegisterAnyUnitEventBJ(t, EVENT_PLAYER_UNIT_UPGRADE_FINISH)
+        TriggerRegisterAnyUnitEventBJ(t, EVENT_PLAYER_UNIT_UPGRADE_CANCEL)
+
+        //alliance changes
+        t = CreateTrigger()
+        TriggerAddAction(t, function catchAllianceChange)
+        i = 0
+        loop
+            exitwhen i >= 12
+            TriggerRegisterPlayerAllianceChange(t, Player(i), ALLIANCE_SHARED_CONTROL)
+            TriggerRegisterPlayerAllianceChange(t, Player(i), ALLIANCE_PASSIVE)
+            TriggerRegisterPlayerAllianceChange(t, Player(i), ALLIANCE_SHARED_VISION)
+            i = i + 1
+        endloop
+        
+        //run player init last
+        t = CreateTrigger()
+        TriggerRegisterTimerEvent(t, 0.00, false)
+        TriggerAddAction(t, function initDefender2)
+    endfunction
+endlibrary
