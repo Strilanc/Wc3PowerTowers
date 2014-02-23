@@ -1,0 +1,84 @@
+library UnitElementalTower initializer init requires Special, DataCreation
+    private ShortList uidsFire
+    private ShortList uidsNature
+    private ShortList uidsWater
+    private constant integer FireAbil = 'A00S'
+    private constant integer NatureAbil = 'A00U'
+    private constant integer WaterAbil = 'A00T'
+    private constant integer FireBuff = 'B001'
+    private constant integer NatureBuff = 'B003'
+    private constant integer WaterBuff = 'B002'
+    private constant integer NumElements = 3
+    private constant integer Fire = 0
+    private constant integer Water = 1
+    private constant integer Nature = 2
+    private constant integer BaseDamage = 12 //update heroDur when changed
+    
+    private function OnCast takes nothing returns boolean
+        integer at = GetSpellAbilityId()
+        
+        //Caster element
+        integer casterElement
+        string msg
+        if at == FireAbil then
+            casterElement = Fire
+            msg = "|cFFFF3333"
+        elseif at == WaterAbil then
+            casterElement = Water
+            msg = "|cFF3333FF"
+        elseif at == NatureAbil then
+            casterElement = Nature
+            msg = "|cFF33FF33"
+        else
+            return true
+        endif
+        
+        //Target element
+        unit target; target = GetSpellTargetUnit()
+        integer targetElement; targetElement = casterElement
+        if GetUnitAbilityLevel(target, FireBuff) > 0 then
+            UnitRemoveAbility(target, FireBuff)
+            targetElement = Fire
+        elseif GetUnitAbilityLevel(target, WaterBuff) > 0 then
+            UnitRemoveAbility(target, WaterBuff)
+            targetElement = Water
+        elseif GetUnitAbilityLevel(target, NatureBuff) > 0 then
+            UnitRemoveAbility(target, NatureBuff)
+            targetElement = Nature
+        endif
+
+        //Damage
+        unit caster; caster = GetTriggerUnit()
+        real dmg; dmg = BaseDamage * (Pow(2, GetUnitAbilityLevel(caster, at)+1) - 1)
+        if targetElement == casterElement then
+            msg += I2S(R2I(dmg)) + "|r"
+        elseif ModuloInteger(targetElement+1, NumElements) == casterElement then
+            msg += "DOUBLE " + I2S(R2I(dmg)) + "|r"
+            dmg *= 2
+        else
+            msg += "HALF " + I2S(R2I(dmg)) + "|r"
+            dmg /= 2
+        endif
+        
+        //Perform
+        showUnitText(target, msg)
+        UnitDamageTarget(caster, target, dmg, true, false, ATTACK_TYPE_NORMAL, DAMAGE_TYPE_NORMAL, WEAPON_TYPE_WHOKNOWS)
+        
+        caster = null
+        target = null
+        return true
+    endfunction
+    
+    private function init takes nothing returns nothing
+        uidsFire = ShortList.create5('h00B', 'h00E', 'h00K', 'h00L', 'h00M')
+        uidsNature = ShortList.create5('h03R', 'h03S', 'h03T', 'h03U', 'h03V')
+        uidsWater = ShortList.create5('h03W', 'h03X', 'h03Y', 'h03Z', 'h040')
+        AddFastUnitEventHandler(EVENT_PLAYER_UNIT_SPELL_EFFECT, function OnCast)
+        CreateCombatSetData(uidsFire, AttackCastType_Unit, FireAbil, OrderId("cripple"))
+        CreateCombatSetData(uidsNature, AttackCastType_Unit, NatureAbil, OrderId("cripple"))
+        CreateCombatSetData(uidsWater, AttackCastType_Unit, WaterAbil, OrderId("cripple"))
+        TintDataSet(uidsFire, 255, 25, 25)
+        TintDataSet(uidsNature, 25, 255, 25)
+        TintDataSet(uidsWater, 25, 25, 255)
+    endfunction
+endlibrary
