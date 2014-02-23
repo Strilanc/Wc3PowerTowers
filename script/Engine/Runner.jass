@@ -1,0 +1,352 @@
+///This structure represents the runners trying to reach the center. It
+///handles most of the pathing (Path handles the waypoints), as well as
+///the various runner abilities, bounties, and taking lives.
+///
+///NOTES:
+///  - Uniqueness: one unit can't have two Runner structures
+///  - Storage: keeps track of allocated structures
+///  - Custom data: assumes unit custom value is not modified elsewhere
+library LibRunners initializer initRunners requires PATH, General, Constants, LibTower, Special, LibDefender, LibTeam, AWALL, Decal, SpawnLib, GEV
+    globals
+        private integer numFeedbackEffects = 0
+        private constant integer MAX_FEEDBACK_EFFECTS = 100
+        private constant real FEEDBACK_EFFECT_DURATION = 0.2
+    endglobals
+
+    private function DestroyFeedbackEffect takes lightning ltng returns nothing
+        DestroyLightning(ltng)
+        numFeedbackEffects -= 1
+    endfunction
+
+    struct PowerTowersSpawn extends SpawnBase
+        readonly static integer numAllocated = 0
+        readonly Defender d
+        readonly SpawnSet s
+        readonly integer ut
+        readonly integer maxHealth
+        readonly integer bounty
+        readonly boolean hasSpeed
+        readonly boolean hasFeedback
+        readonly boolean hasShield
+        
+        public static method create takes Defender d, SpawnSet ss, integer ut, integer maxHealth, integer bounty, boolean hasSpeed, boolean hasFeedback, boolean hasShield returns PowerTowersSpawn
+            if ut == 0 or bounty < 0 or maxHealth <= 0 then; return 0; endif
+            AllocateThis
+            
+            .d = d
+            .ut = ut
+            .maxHealth = maxHealth
+            .bounty = bounty
+            .hasSpeed = hasSpeed
+            .hasFeedback = hasFeedback
+            .hasShield = hasShield
+            thistype.numAllocated = thistype.numAllocated + 1
+            .s = ss
+            return this
+        endmethod
+        private method onDestroy takes nothing returns nothing
+            PowerTowersSpawn.numAllocated = PowerTowersSpawn.numAllocated - 1
+        endmethod
+        public static method createDefault takes Defender d, SpawnSet ss, integer r returns PowerTowersSpawn
+            return PowerTowersSpawn.create(d, ss, getRoundRunnerUnitType(r), getRoundRunnerHealth(r, Game.difficulty), getRoundRunnerBounty(r), isSpeedRound(r), isFeedbackRound(r), isShieldRound(r))
+        endmethod
+        public method clone takes nothing returns SpawnBase
+            macro_NullGuard(0)
+            return PowerTowersSpawn.create(.d, .s, .ut, .maxHealth, .bounty, .hasSpeed, .hasFeedback, .hasShield)
+        endmethod    
+        public method spawn takes nothing returns unit
+            Runner r
+            macro_NullGuard(null)
+            r = Runner.create(this)
+            if r == 0 then; return null; endif
+            return r.u
+        endmethod
+        public method getSpawnSet takes nothing returns SpawnSet
+            macro_NullGuard(0)
+            return .s
+        endmethod
+    endstruct
+
+    ///Orders the runner to move to its next waypoint
+    function OrderRunnerToWaypoint takes integer runner_arg returns nothing
+        Runner(runner_arg).orderToWaypoint()
+    endfunction
+    private function redirect_catchWalled takes unit u, integer reason, string desc returns nothing
+        Runner.fromUnit(u).OnWalled(reason, desc)
+    endfunction
+    private function redirect_catchWaypoint takes PATH_PathingUnit target returns nothing
+        Runner.fromUnit(target.u).OnWaypoint(target)
+    endfunction
+    private function redirect_catchFinished takes PATH_PathingUnit target returns nothing
+        Runner.fromUnit(target.u).OnFinished(target)
+    endfunction
+
+    struct Runner
+        //! runtextmacro CreateInitOnceMethod("Runner")
+        readonly static integer numAllocated = 0
+
+        readonly unit u = null
+        readonly Defender owner = 0
+        readonly integer confusedCount = 0
+        readonly boolean hasFeedback = false
+        readonly boolean hasShield = false
+        readonly boolean hasSpeed = false
+        readonly integer bounty = 0
+        readonly player sender
+
+        ///Returns the runner structure representing a given unit
+        public static method fromUnit takes unit u returns Runner
+            integer i = GetUnitUserData(u)
+            if Runner(i).u == u and u != null then
+                return Runner(i)
+            endif
+            return 0
+        endmethod
+
+        //=====================================
+        //=== FUNCTIONS =======================
+        //=====================================
+        ///Returns true if the matching unit is a runner
+        public static method filter_isRunner takes nothing returns boolean
+            return Runner.fromUnit(GetFilterUnit()) != 0
+        endmethod
+        
+        ///Orders the runner to move to its next waypoint
+        public method orderToWaypoint takes nothing returns nothing
+            macro_NullGuard()
+            PATH_PathingUnit[.u].Order()
+        endmethod
+
+        ///Moves the runner increasingly longer distances to get around walls
+        public method OnWalled takes integer reason, string desc returns nothing
+            if this == 0 then
+                BJDebugMsg("Map Error: Caught walled unit that wasn't a runner. (Runner.catchWalled)")
+                return
+            endif
+
+            if reason == AWALL_REASON_PREVENT then
+                //probably not on purpose
+                .orderToWaypoint()
+                return
+            endif
+
+            //message
+            string msg; msg = "|cFFFF0000Warning: A runner was caught|r |cFFFFCC00" + desc + "|r"
+            
+            //range (and more message)
+            .confusedCount = .confusedCount + 1
+            if .confusedCount <= 1 then
+                msg += " |cFFFF8000(short jump)|r"
+                range = 100
+            elseif .confusedCount == 2 then
+                msg += " |cFFFF8000(medium jump)|r"
+                range = 750
+            elseif .confusedCount >= 3 then
+                msg += " |cFFFF8000(long jump)|r"
+                range = 50000
+            endif
+
+            //get waypoint target
+            real x1; x1 = GetUnitX(.u)
+            real y1; y1 = GetUnitY(.u)
+            location p; p = PATH_PathingUnit[.u].GetTargetLoc()
+            real dx; dx = GetLocationX(p) - x1
+            real dy; dy = GetLocationY(p) - y1
+            RemoveLocation(p)
+            p = null
+
+            //get blink target (don't blink too far or into water)
+            real d; d = RMaxBJ(SquareRoot(dx*dx + dy*dy), 1)
+            real range = 0; range = RMinBJ(range, d)
+            loop
+                //continue when the point is walkable and not in water (remember IsTerrainPathable has backwards logic)
+                x2 = x1 + range*dx/d
+                y2 = y1 + range*dy/d        
+                exitwhen IsTerrainPathable(x2, y2, PATHING_TYPE_WALKABILITY) != true and IsTerrainPathable(x2, y2, PATHING_TYPE_FLOATABILITY) != false
+
+                //increase range to avoid bad points
+                range += 100
+            endloop
+
+            //blink to destination
+            Team t
+            t = .owner.team
+            t.ShowTeamMessage(msg)
+            SetUnitPosition(.u, x2, y2)
+            real x2; x2 = GetUnitX(.u)
+            real y2; y2 = GetUnitY(.u)
+            
+            //effects
+            schedule_lightning(Action_lightning.DestroyLightning2, 0.5, AddLightning("AFOD", true, x1, y1, x2, y2)) //finger of death
+            createBang(x1, y1, "Abilities\\Spells\\NightElf\\Blink\\BlinkCaster.mdl")
+            createBang(x2, y2, "Abilities\\Spells\\NightElf\\Blink\\BlinkTarget.mdl")
+            if IsPlayerInForce(GetLocalPlayer(), t.memberForce) then
+                PingMinimapEx(x1, y1, 2.0, 255, 0, 0, false)
+                PingMinimapEx(x2, y2, 3.0, 255, 128, 0, false)
+            endif
+
+            //continue on your way
+            .orderToWaypoint()
+            schedule_integer(Action_integer.OrderRunnerToWaypoint, 0, this)
+        endmethod
+
+        ///Makes sure runners don't stop after casting divine shield
+        private static method OnCasting takes nothing returns nothing
+            if GetSpellAbilityId() == ABIL_RUNNER_SHIELD then
+                Runner.fromUnit(GetTriggerUnit()).orderToWaypoint()
+            endif
+        endmethod
+
+        public static method OnWaypoint takes PATH_PathingUnit u returns nothing
+            AWALL_Runner[u.u].ClearTrail()
+        endmethod
+        public static method OnFinished takes PATH_PathingUnit u returns nothing
+            Runner this = Runner.fromUnit(u.u)
+            macro_NullGuard()
+            War_OnFinish(this)
+
+            //Punish the owner
+            if .owner.team.maxRound <= 1 then
+                //Only display warnings on first round
+                DisplayTextToPlayer(GetLocalPlayer(),0,0, .owner.team.getName() + " let a runner through! (Misses are forgiven during the first round)")
+            else
+                //Take Life
+                .owner.team.loseLife()
+            endif
+
+            //Gibblets!
+            SetUnitExploded(.u, true)
+            KillUnit(.u)
+        endmethod
+        
+        ///Gives bounty for killing runners and destroys runners
+        private static method OnDeath takes nothing returns nothing
+            Runner this = Runner.fromUnit(GetTriggerUnit())
+            macro_NullGuard()
+
+            //Credit the killing unit
+            unit killer
+            killer = GetKillingUnit()
+            showUnitText(killer, "|cFFFF8000Kill!|r")
+
+            //Choose who gets the bounty
+            Defender d
+            if killer == null then
+                //no income
+                d = 0
+            elseif not Game.fair_income then
+                d = Defender.fromUnit(killer)
+            else
+                d = .owner
+                if d.state != DEFENDER_STATE_DEFENDING then
+                    d = d.team.getNextIncomeDefender()
+                endif
+                if d == 0 then
+                    BJDebugMsg("Map Error: No fair income owner found. (Runner.catchDeath)")
+                endif
+            endif
+
+            //Give Bounty
+            if d != 0 and d.state == DEFENDER_STATE_DEFENDING and .bounty > 0 then
+                showUnitTextToPlayer(.u, "|cFFFFCC00+" + I2S(.bounty) + "|r", d.p)
+                AdjustPlayerStateBJ(.bounty, d.p, PLAYER_STATE_RESOURCE_GOLD)
+            endif
+
+            .destroy()
+            UpdateMultiboard()
+            killer = null
+        endmethod
+
+        public static method event_damage_feedback takes nothing returns nothing
+            Runner r = Runner.fromUnit(GetTriggerUnit())
+            Tower t = Tower[GetEventDamageSource()]
+            integer dmgMana = R2I(GetEventDamage()/10)
+            if t == 0 or dmgMana <= 0 or t.GetEnergy() <= 0 then; return; endif
+
+            //burn energy
+            t.AdjustEnergy(-dmgMana)
+            showUnitText(t.u, "|cFF80FF00" + I2S(-dmgMana) + "|r")
+
+            //show lightning effects
+            if numFeedbackEffects < MAX_FEEDBACK_EFFECTS then
+                real rx; rx = GetUnitX(r.u)
+                real ry; ry = GetUnitY(r.u)
+                lightning ltng; ltng = AddLightning("MFPB", true, rx, ry, GetUnitX(t.u), GetUnitY(t.u))
+                numFeedbackEffects += 1
+                SetSoundPosition(gg_snd_Feedback, rx, ry, 0)
+                StartSound(gg_snd_Feedback)
+                schedule_lightning(Action_lightning.DestroyFeedbackEffect, FEEDBACK_EFFECT_DURATION, ltng)
+                ltng = null
+            endif        
+        endmethod
+        public static method event_damage_shield takes nothing returns nothing
+            IssueImmediateOrder(GetTriggerUnit(), "divineshield")
+        endmethod
+        
+        ///Spawns a runner
+        public static method create takes PowerTowersSpawn s returns Runner
+            if s == 0 then; return 0; endif
+            if s.d.team.state == TEAM_STATE_DEAD then; return 0; endif
+            AllocateThis
+
+            //spawn the runner
+            .u = CreateUnit(RUNNERS_OWNER, s.ut, s.d.path.getWaypointX(1), s.d.path.getWaypointY(1), bj_UNIT_FACING)
+            SetUnitColor(.u, GetPlayerColor(s.d.p))
+            .owner = s.d
+            .bounty = s.bounty
+            setUnitMaxHealth(.u, s.maxHealth)
+            RemoveGuardPosition(.u)
+            
+            Runner.numAllocated += 1
+            SetUnitUserData(.u, integer(this))
+            
+            //Give abilities
+            if s.hasSpeed then
+                .hasSpeed = true
+                UnitAddAbility(.u, ABIL_RUNNER_SPEED) //speed boost
+                IssueImmediateOrder(.u, "berserk") //activate it
+            endif
+            if s.hasFeedback then
+                .hasFeedback = true
+                UnitAddAbility(.u, ABIL_RUNNER_FEEDBACK)
+                IssueImmediateOrder(.u, "immolation") //activate it
+                LibRunners_RunnerFeedbackAddUnit.evaluate(.u)
+            endif
+            if s.hasShield then
+                .hasShield = true
+                UnitAddAbility(.u, ABIL_RUNNER_SHIELD)
+                LibRunners_RunnerShieldAddUnit.evaluate(.u)
+            endif
+
+            //send the runner on its way
+            AWALL_Runner.create(.u, AWALL_UnitWalledCallback.redirect_catchWalled)
+            PATH_PathingUnit.create(.u, .owner.path, PATH_WaypointCallback.redirect_catchWaypoint, PATH_FinishedCallback.redirect_catchFinished)
+            .orderToWaypoint()
+            
+            return this
+        endmethod
+        
+        ///Cleans up the Runner
+        private method onDestroy takes nothing returns nothing
+            AWALL_Runner[.u].destroy()
+            PATH_PathingUnit[.u].destroy()
+            SpawnLib_RemoveUnit(.u)
+            SetUnitUserData(.u, 0)
+            .u = null
+            Runner.numAllocated -= 1
+        endmethod
+
+        ///Initializes the Runner structure
+        private static method init takes nothing returns nothing
+            AddUnitEventHandler(EVENT_PLAYER_UNIT_DEATH, function Runner.OnDeath)
+            AddUnitEventHandler(EVENT_PLAYER_UNIT_SPELL_EFFECT, function Runner.OnCasting)
+        endmethod
+    endstruct
+    
+    //! runtextmacro CreateGroupEvent("RunnerFeedback", "EVENT_UNIT_DAMAGED", "function Runner.event_damage_feedback")
+    //! runtextmacro CreateGroupEvent("RunnerShield", "EVENT_UNIT_DAMAGED", "function Runner.event_damage_shield")
+
+    private function initRunners takes nothing returns nothing
+        Runner.initonce()
+    endfunction
+endlibrary
