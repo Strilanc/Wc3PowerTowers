@@ -1,0 +1,51 @@
+library UnitHeroTower initializer init requires DataCreation
+    private constant integer UID_HeroConstructor = 'h03K'
+    private constant integer UID_HeroFootprint = 'h03Q'
+    private constant integer UID_HeroTower = 'H03J'
+    
+    private struct Hero
+        implement PAM_Property
+        private unit hero
+        private unit footprint
+        
+        public constructor(unit hero)
+            .hero = hero
+            .footprint = CreateUnit(GetOwningPlayer(hero), UID_HeroFootprint, GetUnitX(hero), GetUnitY(hero), GetUnitFacing(hero))
+            Tower.create(.hero)
+            Hero[.hero] = this
+            return this
+        endconstructor
+        private method onDestroy takes nothing returns nothing
+            assert(this != 0)
+            Hero.RemoveKey(.hero)
+            KillUnit(.footprint)
+            ShowUnit(.footprint, false)
+            .hero = null
+            .footprint = null
+        endmethod
+    endstruct
+    
+    private function OnDeath takes nothing returns nothing
+        unit u = GetTriggerUnit()
+        if GetUnitTypeId(u) == UID_HeroTower then
+            Hero[u].destroy()
+        endif
+        u = null
+    endfunction
+    
+    private function OnFinishBuild takes nothing returns nothing    
+        unit u = GetTriggerUnit()
+        if GetUnitTypeId(u) == UID_HeroConstructor then
+            KillUnit(u)
+            ShowUnit(u, false)
+            Hero.create(CreateUnit(GetOwningPlayer(u), UID_HeroTower, GetUnitX(u), GetUnitY(u), GetUnitFacing(u)))
+        endif
+        u = null
+    endfunction
+    
+    private function init takes nothing returns nothing
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_DEATH, function OnDeath)
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_CONSTRUCT_FINISH, function OnFinishBuild)
+        PowerData.create(UID_HeroTower, GetUnitPointValueByType(UID_HeroTower), 0, GetUnitPointValueByType(UID_HeroTower)/3)
+    endfunction
+endlibrary
