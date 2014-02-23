@@ -1,0 +1,194 @@
+///Implements the -block player command, which is used to keep other players out of your area.
+///Your area is defined as the set of points at least 5% closer to your start location than
+///any other living player. Using -block will sell all the target player's towers in your area.
+///The block persists until -unblock is used.
+library BlockCommandLib initializer initBlock requires General, Constants, LibDefender, Special
+    globals
+        private boolean array blockMatrix
+        private constant real beatOffset = 512
+    endglobals
+
+    ///Returns true if the guard player can block the challenger at the given location
+    ///A guard may block a challenger when:
+    ///- The location is in the guard's private area
+    ///- The location is in the guard's public area, but not in the challenger's public area
+    ///This is a very crude approximation, but it works
+    function CanPlayerBlockAreaFrom takes player guard, real x, real y, player challenger returns boolean
+        player p = RUNNERS_OWNER //make the center common ground
+        real dx = GetPlayerStartLocationX(p)-x
+        real dy = GetPlayerStartLocationY(p)-y
+        real minDistance = SquareRoot(dx*dx + dy*dy)*0.6
+        real minDistance2 = minDistance
+        real privateDistance = 0
+        real publicDistance = 0
+        real guardDistance = 0
+        real challengerDistance = 0
+        real curDistance
+        integer i
+        if guard == null or challenger == null or guard == challenger then
+            return false
+        endif
+        
+        //Get the required distances
+        i = 1
+        loop
+            exitwhen i > NUM_DEFENDERS
+            
+            if defenders[i].state == DEFENDER_STATE_DEFENDING then
+                //get player distance
+                p = defenders[i].p
+                dx = GetPlayerStartLocationX(p)-x
+                dy = GetPlayerStartLocationY(p)-y
+                curDistance = SquareRoot(dx*dx + dy*dy)
+                if curDistance < minDistance then
+                    minDistance2 = minDistance
+                    minDistance = curDistance
+                elseif curDistance < minDistance2 then
+                    minDistance2 = curDistance
+                endif
+                if guard == p then
+                    guardDistance = curDistance
+                elseif challenger == p then
+                    challengerDistance = curDistance
+                endif
+            endif
+
+            i = i + 1
+        endloop
+        privateDistance = minDistance2-beatOffset
+        publicDistance = minDistance+beatOffset
+        
+        //Check for priority
+        if guardDistance <= privateDistance then
+            return true
+        elseif guardDistance <= publicDistance and challengerDistance > publicDistance-beatOffset/2 then
+            return true
+        endif
+        
+        return false
+    endfunction
+        
+    function BlockUnit takes unit u returns nothing
+        Defender d = Defender.fromUnit(u)
+        if not IsUnitInGroup(u, d.specialUnits) then
+            KillUnit(u)
+        else
+            SetUnitPosition(u, GetPlayerStartLocationX(d.p), GetPlayerStartLocationY(d.p))
+        endif
+    endfunction
+
+    private function matrixIndex takes player blocker, player target returns integer
+        if blocker == null or target == null then; return 0; endif
+        return GetPlayerId(blocker)*NUM_DEFENDERS + GetPlayerId(target)
+    endfunction
+    function IsPlayerBlockingPlayer takes player blocker, player target returns boolean
+        if blocker == null or target == null then; return false; endif
+        if Defender[blocker].state != DEFENDER_STATE_DEFENDING then; return false; endif
+        if Defender[target].state != DEFENDER_STATE_DEFENDING then; return false; endif
+        return blockMatrix[matrixIndex(blocker, target)]
+    endfunction
+    private function SetPlayerBlockingPlayer takes player blocker, player target , boolean b returns boolean
+        if blocker == null or target == null then; return false; endif
+        blockMatrix[matrixIndex(blocker, target)] = b
+        return true
+    endfunction
+    
+    private function unblock takes Defender blocker, Defender target returns nothing
+        if blocker == 0 or target == 0 then; return; endif
+        if blocker == target or target.state != DEFENDER_STATE_DEFENDING then; return; endif
+        if blocker.state != DEFENDER_STATE_DEFENDING then
+            return
+        elseif not IsPlayerBlockingPlayer(blocker.p, target.p) then
+            DisplayTextToPlayer(blocker.p,0,0,"You're already not blocking " + target.getNameWithColor())
+            return
+        endif
+        
+        //unblock
+        SetPlayerBlockingPlayer(blocker.p, target.p, false)
+        DisplayTextToPlayer(blocker.p,0,0,"You unblocked " + target.getNameWithColor())
+        DisplayTextToPlayer(target.p,0,0,blocker.getNameWithColor() + " has unblocked you.")
+    endfunction
+    private function block takes Defender blocker, Defender target returns nothing
+        unit u
+        if blocker == 0 or target == 0 then; return; endif
+        if blocker == target or target.state != DEFENDER_STATE_DEFENDING then; return; endif
+        if Game.state == GAME_STATE_INTRO then
+            DisplayTextToPlayer(blocker.p,0,0,"You can't -block before the settings are picked.")
+            return
+        elseif blocker.state != DEFENDER_STATE_DEFENDING then
+            DisplayTextToPlayer(blocker.p,0,0,"You can't -block after you've been killed.")
+            return
+        elseif blocker.team == target.team then
+            DisplayTextToPlayer(blocker.p,0,0,"You can't -block your own team.")
+            return
+        elseif IsPlayerBlockingPlayer(blocker.p, target.p) then
+            DisplayTextToPlayer(blocker.p,0,0,"You're already blocking " + target.getNameWithColor())
+            return
+        endif
+        
+        //block
+        SetPlayerBlockingPlayer(blocker.p, target.p, true)
+        DisplayTextToPlayer(blocker.p,0,0,"You blocked " + target.getNameWithColor() + " from building in your area.")
+        DisplayTextToPlayer(target.p,0,0,blocker.getNameWithColor() + " has blocked you from building in their area.")
+
+        //block all offending units
+        GroupEnumUnitsOfPlayer(StackGroup(), target.p, NO_FILTER)
+        loop
+            u = FirstOfGroup(TopGroup())
+            exitwhen u == null
+            GroupRemoveUnit(TopGroup(), u)
+            if CanPlayerBlockAreaFrom(blocker.p, GetUnitX(u), GetUnitY(u), target.p) then
+                BlockUnit(u)
+            endif
+        endloop
+        PopGroup()
+    endfunction
+        
+    function GetPossibleBlocker takes unit u, boolean requireBlockingActivated returns Defender
+        integer i
+        player p = GetOwningPlayer(u)
+        player q
+        i = 1
+        loop
+            exitwhen i > NUM_DEFENDERS
+            q = defenders[i].p
+            if CanPlayerBlockAreaFrom(q, GetUnitX(u), GetUnitY(u), p) then
+                if IsPlayerBlockingPlayer(q, p) or not requireBlockingActivated then
+                    return defenders[i]
+                endif
+            endif
+            i = i + 1
+        endloop
+        return 0
+    endfunction
+    function tryBlockUnit takes unit u returns nothing
+        Defender target = Defender.fromUnit(u)
+        Defender guard = GetPossibleBlocker(u, true)
+        if guard != 0 then
+            BlockUnit(u)
+            DisplayTextToPlayer(target.p,0,0,guard.getNameWithColor() + " is blocking you from that area.")
+        endif
+    endfunction
+    
+    private function OnEnter takes nothing returns nothing
+        tryBlockUnit(GetTriggerUnit())
+    endfunction
+    private function OnChat takes nothing returns nothing
+        string s = GetEventPlayerChatString()
+        s = StringCase(s, false)
+        if SubString(s, 0, 7) == "-block " then
+            s = SubString(s, 7, StringLength(s))
+            block(Defender[GetTriggerPlayer()], Defender.fromString(s))
+        elseif SubString(s, 0, 9) == "-unblock " then
+            s = SubString(s, 9, StringLength(s))
+            unblock(Defender[GetTriggerPlayer()], Defender.fromString(s))
+        endif
+    endfunction
+
+    ///Initializes the block command
+    private function initBlock takes nothing returns nothing
+        AddChatEventHandler("-block ", false, function OnChat)
+        AddChatEventHandler("-unblock ", false, function OnChat)
+        AddUnitEnterMapEventHandler(function OnEnter)
+    endfunction
+endlibrary
