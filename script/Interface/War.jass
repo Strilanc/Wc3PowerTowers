@@ -1,0 +1,282 @@
+///Handles all the stuff needed for War mode. Mainly it deals with summoning
+///runners to other players. It is only initialized if war mode is selected.
+library War requires General, Constants, SpawnLib, PAM, BlockCommandLib
+    private constant integer UNIT_SUMMON_NORMAL = 'h042'
+    private constant integer UNIT_SUMMON_MULTIPLE = 'h045'
+    private constant integer UNIT_SUMMON_HEAVY = 'h046'
+    private constant integer UNIT_SUMMON_SPEED = 'h047'
+    private constant integer UNIT_SUMMON_FEEDBACK = 'h048'
+    private constant integer UNIT_SUMMON_DIVINE = 'h049'
+    private constant integer UNIT_SUMMON_THIEF = 'h04A'
+    private constant integer UNIT_SUMMON_REAPER = 'h04B'
+    private constant integer UNIT_SUMMON_HERO = 'h04C'
+    private constant integer ABIL_SUMMON_TIP = 'A00W'
+    private constant integer ABIL_BLINK = 'A016'
+    private constant real SUMMON_MAX_HEALTH_FACTOR = 1.0
+    private constant real SUMMON_HEALTH_FACTOR = 0.25
+    private constant integer THIEF_STEAL_AMOUNT = 20
+    private constant integer REAPER_LIVES_AMOUNT = 5
+    
+    private SpawnSet array summonSets
+    
+    private struct WarSummon
+        implement PAM_Property
+        readonly Defender sender
+        readonly Defender victim
+        readonly integer cost
+        public static method create takes Defender sender, Defender victim, integer cost returns WarSummon
+            WarSummon this = WarSummon.allocate()
+            .sender = sender
+            .victim = victim
+            .cost = cost
+            return this
+        endmethod
+    endstruct
+    //! runtextmacro CreateTriplet("steal", "Defender", "sender", "Defender", "victim", "integer", "gold_to_steal")
+    
+    ///Steals gold as it becomes available
+    private function TrySteal takes integer arg_steal returns nothing
+        Triplet_steal steal = arg_steal
+        integer goldToSteal = steal.gold_to_steal
+        Defender sender = steal.sender
+        Defender victim = steal.victim
+        integer goldAvailable
+        steal.destroy()
+        
+        //make sure we have an active victim
+        if victim.state != DEFENDER_STATE_DEFENDING then
+            victim = victim.team.getNextIncomeDefender()
+        endif
+        if victim.state != DEFENDER_STATE_DEFENDING then
+            tell(sender.p, victim.team.getName() + " ran off before paying your dues! Well... what can you do?")
+            return
+        endif
+        
+        //make sure we don't draw blood from stones
+        goldAvailable = GetPlayerState(victim.p, PLAYER_STATE_RESOURCE_GOLD)
+        if goldAvailable < goldToSteal then
+            //get the rest later
+            schedule_integer(Action_integer.TrySteal, 1., Triplet_steal.create(sender, victim, goldToSteal-goldAvailable))
+            if goldAvailable > 0 then
+                tell(victim.p, "You don't have enough to pay " + sender.getNameWithColor() + "! You'll be charged more later.")
+            endif
+            //but get what we can now
+            goldToSteal = goldAvailable
+        endif
+        if goldToSteal <= 0 then; return; endif
+        
+        //steal some gold
+        SetPlayerState(sender.p, PLAYER_STATE_RESOURCE_GOLD, GetPlayerState(sender.p, PLAYER_STATE_RESOURCE_GOLD) + goldToSteal)
+        SetPlayerState(victim.p, PLAYER_STATE_RESOURCE_GOLD, goldAvailable - goldToSteal)
+        tell(sender.p, "You have stolen |cFFFFCC00" + I2S(goldToSteal) + " gold|r from " + victim.getNameWithColor())
+        tell(victim.p, victim.getNameWithColor() + " has stolen |cFFFFCC00" + I2S(goldToSteal) + " gold|r from you")
+    endfunction
+    private function OnSpawn takes nothing returns nothing
+        integer i = 1
+        Runner r = Runner.fromUnit(SpawnLib_TriggeringUnit)
+        loop
+            exitwhen i > NUM_DEFENDERS
+            if SpawnLib_TriggeringSpawnSet == summonSets[defenders[i].index] then
+                WarSummon[r.u] = WarSummon.create(defenders[i], r.owner, r.bounty)
+                return
+            endif
+            i = i + 1
+        endloop
+    endfunction
+    public function OnFinish takes Runner r returns nothing
+        WarSummon summon = WarSummon[r.u]
+        Defender sender = summon.sender
+        Defender victim = summon.victim
+        integer cost = summon.cost
+        if summon == 0 then; return; endif
+        summon.destroy()
+        WarSummon.RemoveKey(r.u)
+        if sender == 0 or victim == 0 or sender.state != DEFENDER_STATE_DEFENDING then; return; endif
+        if cost > 0 then
+            AdjustPlayerStateBJ(cost, sender.p, PLAYER_STATE_RESOURCE_GOLD)
+            tell(sender.p, "Your summon finished and returned its cost of |cFFFFCC00" + I2S(cost) + " gold.")
+        endif
+        if GetUnitTypeId(r.u) == UNIT_SUMMON_THIEF then
+            schedule_integer(Action_integer.TrySteal, 0., Triplet_steal.create(sender, victim, THIEF_STEAL_AMOUNT))
+            print(sender.getNameWithColor() + " stole " + I2S(THIEF_STEAL_AMOUNT) + " gold from " + victim.getNameWithColor() + "!")
+        elseif GetUnitTypeId(r.u) == UNIT_SUMMON_REAPER then
+            sender.team.setLives(sender.team.lives + REAPER_LIVES_AMOUNT)
+            print(sender.team.getName() + " reaped some lives! (" + I2S(sender.team.lives) + " left)")
+        endif
+    endfunction
+    
+    private function summonMaxHealth takes integer r returns integer
+        return R2I(getRoundRunnerHealth(r, Game.difficulty)*SUMMON_MAX_HEALTH_FACTOR)
+    endfunction
+    private function summonHealthPerMana takes integer r returns real
+        if r <= 0 then; r = 1; endif
+        return summonMaxHealth(r)*SUMMON_HEALTH_FACTOR/getRoundAccumulatedBounty(r)
+    endfunction
+
+    private function OnCast takes nothing returns nothing
+        unit u
+        player p
+        if GetSpellAbilityId() == ABIL_BLINK then
+            location p2
+            u = GetTriggerUnit()
+            p2 = GetSpellTargetLoc();
+            createBang(GetUnitX(u), GetUnitY(u), "Abilities\\Spells\\NightElf\\Blink\\BlinkCaster.mdl")
+            createBang(GetSpellTargetX(), GetSpellTargetY(), "Abilities\\Spells\\NightElf\\Blink\\BlinkTarget.mdl")
+            
+            Tower[u].CancelTransfersIn()
+            SetUnitPositionLoc(u, p2)
+            tryBlockUnit(u)
+            
+            RemoveLocation(p2)
+            p2 = null
+        elseif GetSpellAbilityId() == ABIL_SUMMON_TIP then
+            u = GetTriggerUnit()
+            p = GetOwningPlayer(u)
+            tell(p, "Energy in Barracks: |cFF0000FF" + I2S(Tower[u].GetEnergy()) + "|r")
+            tell(p, "Current Health/Energy: |cFFFF8000" + R2S(summonHealthPerMana(Defender.fromUnit(u).team.maxRound)) + "|r")
+            tell(p, "Current Base Max Health: |cFF00FF00" + I2S(R2I(summonMaxHealth(Defender.fromUnit(u).team.maxRound))) + "|r")
+            u = null
+            p = null
+        endif
+    endfunction
+        
+    private function OnTrained takes nothing returns nothing
+        unit trainee = GetTrainedUnit()
+        unit trainer = GetTriggerUnit()
+        Defender d
+        Defender src = Defender.fromUnit(trainer)
+        Defender dst = 0
+
+        SetUnitExploded(trainee, true)
+        KillUnit(trainee)
+        
+        Tower t = Tower[trainer]
+        if t.GetEnergy() <= 0 then
+            playSoundForPlayer(gg_snd_Hint, src.p)
+            tell(src.p, "|cFF00FF00Tip:|r |cFFFF0000Summon failed.|r |cFF00FF00You need to transfer energy to the barracks to summon runners.")
+            trainee = null
+            trainer = null
+            return
+        endif
+
+        //pick enemy defender the rally point is on
+        integer i
+        dst = 0
+        location p; p = GetUnitRallyPoint(trainer)
+        if p != null then
+            loopForIntBelow(i, NUM_DEFENDERS)
+                if defenders[i+1].path.containsPoint(GetLocationX(p), GetLocationY(p)) then
+                    dst = defenders[i+1]
+                    break
+                endif
+            endloop
+            RemoveLocation(p)
+            p = null
+        endif
+        if dst == 0 or dst.state != DEFENDER_STATE_DEFENDING or dst.team == src.team then
+            //pick random enemy defender if no target picked
+            dst = 0
+            i = 1
+            integer n; n = GetRandomInt(1, Defender.countLiveDefenders() - src.team.countLivingMembers())
+            loop
+                exitwhen n < 1 or i > NUM_DEFENDERS
+                d = defenders[i]
+                if d.state == DEFENDER_STATE_DEFENDING and d.team != src.team then
+                    dst = d
+                    n = n - 1
+                endif
+                i = i + 1
+            endloop
+            if dst == 0 then
+                //the game should be ending (war is always last man standing)
+                tell(src.p, "No possible summon targets.")
+                trainee = null
+                trainer = null
+                return
+            endif
+        endif
+        
+        //properties
+        integer uid = GetUnitTypeId(trainee)
+        integer maxhp = summonMaxHealth(src.team.maxRound)
+        boolean hasSpeed = false
+        boolean hasFeedback = false
+        boolean hasShield = false
+        integer bounty = 0
+        integer numSpawned = 1
+        real healthPerMana = summonHealthPerMana(src.team.maxRound)
+        if uid == UNIT_SUMMON_NORMAL then
+            maxhp /= 2
+        elseif uid == UNIT_SUMMON_SPEED then
+            hasSpeed = true
+            healthPerMana /= 1.2
+        elseif uid == UNIT_SUMMON_FEEDBACK then
+            hasFeedback = true
+            maxhp /= 2
+        elseif uid == UNIT_SUMMON_DIVINE then
+            hasShield = true
+            healthPerMana /= 1.2
+        elseif uid == UNIT_SUMMON_HERO then
+            hasSpeed = true
+            hasFeedback = true
+            hasShield = true
+            healthPerMana /= 2
+        elseif uid == UNIT_SUMMON_HEAVY then
+            maxhp *= 3
+            healthPerMana /= 1.5
+        elseif uid == UNIT_SUMMON_MULTIPLE then
+            maxhp /= 2
+            numSpawned = 3
+            healthPerMana /= 1.5
+        elseif uid == UNIT_SUMMON_THIEF then
+            bounty = 1
+            maxhp *= 5
+            healthPerMana /= 1.5
+        elseif uid == UNIT_SUMMON_REAPER then
+            bounty = 2
+            maxhp *= 5
+            healthPerMana /= 2
+        endif
+        maxhp = IMinBJ(maxhp, floor(t.GetEnergy()*healthPerMana))
+        if maxhp < 1 then
+            maxhp = 1
+        endif
+        t.AdjustEnergy(-floor(maxhp/healthPerMana))
+        
+        //spawn
+        SpawnBase s; s = PowerTowersSpawn.create(dst, summonSets[src.index], uid, maxhp, bounty, hasSpeed, hasFeedback, hasShield)
+        dst.stream.spawnMultiple(s, numSpawned, 0.)
+        s.destroy()
+
+        //inform
+        tell(src.p, "Sent a |cFFFFCC00" + GetUnitName(trainee) +  "|r with |cFF00FF00" + I2S(maxhp) + " hp|r to " + dst.getNameWithColor())
+        tell(dst.p, src.getNameWithColor() + " sent a |cFFFFCC00" + GetUnitName(trainee) + "|r with |cFF00FF00" + I2S(maxhp) + " hp|r.")
+        trainee = null
+        trainer = null
+    endfunction
+    
+    function startWar takes nothing returns nothing
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_TRAIN_FINISH, function OnTrained)
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_SPELL_CAST, function OnCast)
+
+        //runners spawning
+        SpawnLib_AddSpawnedCallBack(function OnSpawn)
+
+        //create barracks
+        integer i
+        loopForIntBelow(i, NUM_DEFENDERS)
+            Defender d; d = defenders[i+1]
+
+            if d.state == DEFENDER_STATE_DEFENDING then
+                location p; p = GetPlayerStartLocationLoc(d.p)
+                unit u; u = CreateUnitAtLoc(d.p, UNIT_BARRACKS, p, bj_UNIT_FACING)
+                GroupAddUnit(d.specialUnits, u)
+                summonSets[d.index] = SpawnSet.create()
+                Tower.create(u)
+                RemoveLocation(p)
+                p = null
+                u = null
+            endif
+        endloop
+    endfunction
+endlibrary
