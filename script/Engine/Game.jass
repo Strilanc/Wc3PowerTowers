@@ -1,0 +1,304 @@
+///Represents the overall game state and environment
+library LibGame initializer init2 requires General, Special, Constants, LibDefender, War
+    constant integer GAME_STATE_INTRO = 1
+    constant integer GAME_STATE_RUNNING = 2
+    constant integer GAME_STATE_DONE = 3
+
+    constant integer DIFFICULTY_NOOB = 0
+    constant integer DIFFICULTY_ROOKIE = 1
+    constant integer DIFFICULTY_HOTSHOT = 2
+    constant integer DIFFICULTY_VETERAN = 3
+    constant integer DIFFICULTY_ELITE = 4
+    constant integer DIFFICULTY_PSYCHO = 5
+    
+    constant integer TEAM_TYPE_SOLO = 1
+    constant integer TEAM_TYPE_COOP = 2
+    constant integer TEAM_TYPE_SIDES = 3
+    constant integer TEAM_TYPE_CORNERS = 4
+
+    constant integer GAME_LENGTH_LAST_MAN = MAX_ROUNDS+1
+    constant integer GAME_LENGTH_ENDLESS = MAX_ROUNDS+2
+    
+    function InitTrig_Game takes nothing returns nothing
+        Game.initonce()
+    endfunction
+
+    private function ShowEndMenu2 takes nothing returns nothing
+        Game.ShowEndMenu()
+    endfunction
+        
+    struct Game
+        //! runtextmacro EnforceStatic("Game")
+        //! runtextmacro CreateInitOnceMethod("Game")
+        readonly static timer start_timer = CreateTimer()
+        public static timerdialog menuTimerDialog
+        readonly static integer state = GAME_STATE_INTRO
+        readonly static integer time = 0 //seconds
+        readonly static integer team_type = -1
+        public static integer difficulty = DIFFICULTY_HOTSHOT
+        public static boolean fair_income = true
+        public static boolean inherit_income = false
+        public static integer numRounds = 15
+        
+        public static boolean warMode = false //allow summoning
+        public static boolean syncedRounds = true //teams start rounds at the same time
+        public static boolean rushedRounds = false //teams can start rounds without waiting for others
+        
+        private button buttonEnd = null
+        private button buttonContinue = null
+
+        ///Returns the number of runners left, include unspawned runners.
+        public static method getFormattedTime takes nothing returns string
+            string s = ""
+            integer n
+            integer t = Game.time
+
+            //seconds
+            n = ModuloInteger(t, 60)
+            t = t / 60
+            s = I2S(n) + "s"
+            //minutes
+            if (t > 0) then
+                n = ModuloInteger(t, 60)
+                t = t / 60
+                s = I2S(n) + "m " + s
+            endif
+            //hours
+            if (t > 0) then
+                n = ModuloInteger(t, 24)
+                t = t / 24
+                s = I2S(n) + "h " + s
+            endif
+            //days
+            if (t > 0) then
+                s = I2S(t) + "d " + s
+            endif
+
+            return s
+        endmethod
+
+        ///Returns the highest round any team is on.
+        public static method getMaxRound takes nothing returns integer
+            integer i = 1
+            integer max = 0
+            loop
+                exitwhen i > Team.numAllocated
+                if Team.teams[i].state != TEAM_STATE_DEAD then
+                    max = IMaxBJ(max, Team.teams[i].maxRound)
+                endif
+                i = i + 1
+            endloop
+            return max
+        endmethod
+
+        ///Returns the lowest round any team is on.
+        public static method getMinRound takes nothing returns integer
+            integer i = 1
+            integer min = MAX_ROUNDS
+            loop
+                exitwhen i > Team.numAllocated
+                if Team.teams[i].state != TEAM_STATE_DEAD then
+                    min = IMinBJ(min, Team.teams[i].minRound)
+                endif
+                i = i + 1
+            endloop
+            return min
+        endmethod
+
+        //=====================================
+        //=== FUNCTIONS =======================
+        //=====================================
+        ////////
+        public static method initTeams takes integer team_type returns nothing
+            integer i
+            Team t
+            if Game.team_type != -1 then
+                DisplayTextToPlayer(GetLocalPlayer(),0,0,"Team type already set.")
+                return
+            endif
+            Game.team_type = team_type
+            if team_type == TEAM_TYPE_SOLO then
+                //everyone is their own team
+            elseif team_type == TEAM_TYPE_COOP then
+                //everyone is on the same team
+                t = defenders[1].team
+                t.merge(defenders[2].team)
+                t.merge(defenders[3].team)
+                t.merge(defenders[4].team)
+                t.merge(defenders[5].team)
+                t.merge(defenders[6].team)
+                t.merge(defenders[7].team)
+                t.merge(defenders[8].team)
+            elseif team_type == TEAM_TYPE_SIDES then
+                //players sharing a side are on the same team
+                defenders[1].team.merge(defenders[8].team)
+                defenders[3].team.merge(defenders[2].team)
+                defenders[5].team.merge(defenders[4].team)
+                defenders[7].team.merge(defenders[6].team)
+            elseif team_type == TEAM_TYPE_CORNERS then
+                //players sharing a corner are on the same team
+                defenders[1].team.merge(defenders[2].team)
+                defenders[3].team.merge(defenders[4].team)
+                defenders[5].team.merge(defenders[6].team)
+                defenders[7].team.merge(defenders[8].team)
+            else
+                BJDebugMsg("Map Error: Unrecognized team type. (Game.initTeams)")
+            endif
+            if Game.inherit_income then
+                loopForIntBelow(i, NUM_DEFENDERS)
+                    if defenders[i+1].state != DEFENDER_STATE_DEFENDING then
+                        defenders[i+1].team.distributeGold(STARTING_GOLD)
+                    endif
+                endloop
+            endif
+        endmethod
+        
+        public static method initLives takes integer lives returns nothing
+            integer i
+            loopForIntBelow(i, NUM_DEFENDERS)
+                SetPlayerState(defenders[i+1].p, PLAYER_STATE_FOOD_CAP_CEILING, lives)
+            endloop
+            loopForIntBelow(i, Team.numAllocated)
+                Team.teams[i+1].setLives(lives)
+            endloop
+        endmethod
+        
+        public static method startGame takes nothing returns nothing
+            if Game.state != GAME_STATE_INTRO then
+                return
+            endif
+
+            PauseTimer(Game.start_timer)
+            DestroyTimer(Game.start_timer)
+            Game.start_timer = null
+            DestroyTimerDialog(Game.menuTimerDialog)
+            Game.menuTimerDialog = null
+            OnStartupTimeOver.evaluate()
+            
+            //countdown
+            integer i
+            loopForIntBelow(i, Team.numAllocated)
+                if Team.teams[i+1].countLivingMembers() <= 0 then
+                    Team.teams[i+1].kill()
+                else
+                    Team.teams[i+1].startNextRoundCountdown()
+                endif
+            endloop
+
+            //started
+            Game.state = GAME_STATE_RUNNING
+            StartMultiboard2()
+            
+            Game.checkForEnd()
+        endmethod
+
+        ///Keeps track of the game time
+        private static method catchTimeTick takes nothing returns nothing
+            Game.time += 1
+        endmethod
+        
+        //=====================================
+        //=== END GAME ========================
+        //=====================================
+        ///
+        private static method conclusionClickedExit takes nothing returns nothing
+            if GetTriggerPlayer() == GetLocalPlayer() then
+                EndGame(true)
+            endif
+        endmethod
+        ///
+        private static method conclusionClickedContinue takes nothing returns nothing
+            integer i = 1
+            Game.numRounds = GAME_LENGTH_ENDLESS
+            Game.state = GAME_STATE_RUNNING
+            loop
+                exitwhen i > Team.numAllocated
+                Team.teams[i].startNextRoundCountdown()
+                i = i + 1
+            endloop
+        endmethod
+        ///
+        public static method ShowEndMenu takes nothing returns nothing
+            dialog d = DialogCreate()
+            trigger t
+            
+            //exit game option
+            t = CreateTrigger()
+            TriggerRegisterDialogButtonEvent(t, DialogAddButton(d, "Exit Game", 0))
+            TriggerAddAction(t, function Game.conclusionClickedExit)
+            
+            //keep playing option
+            if Team.countLivingTeams() > 0 then
+                t = CreateTrigger()
+                TriggerRegisterDialogButtonEvent(t, DialogAddButton(d, "Keep Playing (endless)", 0))
+                TriggerAddAction(t, function Game.conclusionClickedContinue)
+            endif
+
+            //show menu
+            if Defender[GetLocalPlayer()].state == DEFENDER_STATE_DEFENDING then
+                DialogSetMessage(d, "|cFF00FF00Victory!|r")
+                StartSound(bj_victoryDialogSound)
+            else
+                DialogSetMessage(d, "|cFFFF0000Defeat!|r")
+                StartSound(bj_defeatDialogSound)
+            endif
+            DialogDisplay(GetLocalPlayer(), d, true)
+        endmethod
+        ///
+        private static method end takes nothing returns nothing
+            integer i
+            if Game.state == GAME_STATE_DONE then; return; endif
+            Game.state = GAME_STATE_DONE
+            if Defender[GetLocalPlayer()].state == DEFENDER_STATE_DEFENDING then
+                DisplayTextToPlayer(GetLocalPlayer(),0,0, "|cFFFFCC00Congratulations! You have survived!|r")
+            endif
+            if Game.syncedRounds then
+                i = 0
+                loop
+                    exitwhen i >= NUM_DEFENDERS
+                    if Defender[Player(i)].state == DEFENDER_STATE_DEFENDING then
+                        MMD_FlagPlayer(Player(i), MMD_FLAG_WINNER)
+                    else
+                        MMD_FlagPlayer(Player(i), MMD_FLAG_LOSER)
+                    endif
+                    i = i + 1
+                endloop
+            endif
+            DisplayTextToPlayer(GetLocalPlayer(),0,0, "|cFFFF8000The game will end in 10 seconds.|r")
+            UpdateMultiboard()
+            schedule(Action.ShowEndMenu2, 10)
+        endmethod
+        ///
+        public static method checkForEnd takes nothing returns nothing
+            if Defender.countLiveDefenders() <= 0 then
+                Game.end()
+            elseif Game.numRounds == GAME_LENGTH_LAST_MAN then
+                if Team.countLivingTeams() <= 1 then
+                    Game.end()
+                endif
+            elseif Game.numRounds != GAME_LENGTH_ENDLESS then
+                if Game.getMinRound() >= Game.numRounds and SpawnLib_NumRemaining() <= 0 then
+                    Game.end()
+                endif
+            endif
+        endmethod
+
+        ///
+        private static method init takes nothing returns nothing
+            trigger t = CreateTrigger()
+            TriggerAddAction(t, function Game.catchTimeTick)
+            TriggerRegisterTimerEvent(t, 1.0, true)
+        endmethod
+    endstruct
+    private function init3 takes nothing returns nothing
+        Game.menuTimerDialog = CreateTimerDialog(Game.start_timer)
+        TimerStart(Game.start_timer, SELECTION_TIME, false, function Game.startGame)
+        TimerDialogSetTitle(Game.menuTimerDialog, "Mode Selection")
+        TimerDialogDisplay(Game.menuTimerDialog, true)
+        Game.initLives(25)
+        StartMultiboard1()
+    endfunction
+    private function init2 takes nothing returns nothing
+        schedule(Action.init3, 0)
+    endfunction
+endlibrary
