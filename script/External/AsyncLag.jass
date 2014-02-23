@@ -1,0 +1,147 @@
+///////////////////////////////////////////////////////////////////////////
+/// Asynchronous Lag Library
+/// v1.00
+/// Strilanc
+///////////////////////////////////////////////////////////////////////////
+/// This library is meant to complement using a host bot. Host bots tend to have higher
+/// limits on the length of time a player can lag before the game is held by the lag screen.
+/// This is generally a good thing, but it hides the fact that a player is lagging.
+///
+/// This library detects players lagging and displays them using timer dialogs. The host bot
+/// does not need to support that aspect of the library.
+///
+/// This library also provides a -wait command, which sends a signal the bot can catch in
+/// order to trigger the lag screen. The host bot must support this signal in order for the
+/// command to work.
+///////////////////////////////////////////////////////////////////////////
+/// Notes:
+/// - Requires vJass in order to compile.
+/// - Just paste the code into the map and the library will do its thing.
+/// - You may call SignalBotToShowLagScreen() to force lag screens [if anyone is lagging] at critical points in the map.
+/// - This library uses SyncStoredInteger, which has been known to interact badly with TriggerSleepAction. You
+///   should use PolledWait or timers instead (GUI people: use "Wait (Game-Time)" instead of "Wait"). TriggerSleepAction
+///   has tons of problems anyways, so you should already not be using it.
+///////////////////////////////////////////////////////////////////////////
+library HostBotAsyncLag initializer init
+    globals
+        private constant string WAIT_COMMAND = "-wait"
+        private constant integer TICK_PERIOD = 500 //ms
+        private constant integer MAX_DELAY = 2000 //ms
+        
+        private gamecache gc
+        private timer array timers
+        private timerdialog array dialogs
+        private integer gameTime = 0
+        private string array colorCodes
+        
+        private constant string FILENAME = "HostBot.AsyncLag"
+        private constant string TICK_KEY = "tick"
+        private constant string WAIT_KEY = "wait"
+    endglobals
+    
+    ///Signals any supporting host bot to hold the game until all lagging players catch up
+    function SignalBotToShowLagScreen takes nothing returns nothing
+        call SyncStoredInteger(gc, WAIT_KEY, WAIT_KEY)
+    endfunction
+
+    ///Determines the latest sync-received time from the player with the given id
+    private function GetPlayerSyncReceivedTime takes integer id returns integer
+        return GetStoredInteger(gc, TICK_KEY, I2S(id))
+    endfunction
+    ///Advances and sync-sends the local time, without desyncing the local game cache
+    private function AdvanceLocalTime takes integer dt returns nothing
+        local integer id = GetPlayerId(GetLocalPlayer())
+        local integer syncedTime = GetPlayerSyncReceivedTime(id)
+        set gameTime = gameTime + dt
+        //send local time
+        call StoreInteger(gc, TICK_KEY, I2S(id), gameTime)
+        call SyncStoredInteger(gc, TICK_KEY, I2S(id))        
+        //restore synced local time [to avoid desyncing cache values between players]
+        call StoreInteger(gc, TICK_KEY, I2S(id), syncedTime)
+    endfunction
+    ///Determines the latest sync-received time from any player. [This value is the same for all players]
+    private function ComputeSharedTime takes nothing returns integer
+        local integer t = 0
+        local integer id = 0
+        loop
+            exitwhen id >= 12
+            set t = IMaxBJ(t, GetPlayerSyncReceivedTime(id))
+            set id = id + 1
+        endloop
+        return t
+    endfunction
+    
+    ///Advances the local time and identifies any laggers, without desyncing the game
+    private function OnTick takes nothing returns nothing
+        //display any lagging players
+        local integer dt
+        local integer sharedTime = ComputeSharedTime()
+        local integer i = 0
+        loop
+            exitwhen i >= 12
+            call TimerDialogDisplay(dialogs[i], false)
+            if GetPlayerSlotState(Player(i)) == PLAYER_SLOT_STATE_PLAYING and GetPlayerController(Player(i)) == MAP_CONTROL_USER then
+                set dt = sharedTime - GetPlayerSyncReceivedTime(i)
+                if dt > MAX_DELAY then //player is lagging
+                    call TimerDialogSetTitle(dialogs[i], "("+WAIT_COMMAND+") |cFF"+colorCodes[i]+GetPlayerName(Player(i))+"|r lag")
+                    call TimerStart(timers[i], dt/1000.0, false, null)
+                    call PauseTimer(timers[i])
+                    call TimerDialogDisplay(dialogs[i], true)
+                endif
+            endif
+            set i = i + 1
+        endloop
+
+        call AdvanceLocalTime(TICK_PERIOD)
+    endfunction
+    
+    private function init takes nothing returns nothing
+        local trigger t
+        local integer i
+        
+        //init ticker
+        set t = CreateTrigger()
+        call TriggerAddAction(t, function OnTick)
+        call TriggerRegisterTimerEvent(t, TICK_PERIOD/1000.0, true)
+        
+        //init lag screen signalling command
+        set t = CreateTrigger()
+        call TriggerAddAction(t, function SignalBotToShowLagScreen)
+        set i = 0
+        loop
+            exitwhen i >= 12
+            call TriggerRegisterPlayerChatEvent(t, Player(i), WAIT_COMMAND, true)
+            set i = i + 1
+        endloop
+        
+        //preload timers and dialogs
+        set i = 0
+        loop
+            exitwhen i >= 12
+            set timers[i] = CreateTimer()
+            set dialogs[i] = CreateTimerDialog(timers[i])
+            set i = i + 1
+        endloop
+
+        //init game cache
+        call FlushGameCache(InitGameCache(FILENAME))
+        set gc = InitGameCache(FILENAME)
+        call StoreInteger(gc, WAIT_KEY, WAIT_KEY, 0)
+        
+        //init color codes
+        set colorCodes[0] = "FF0303" //red
+        set colorCodes[1] = "0042FF" //blue
+        set colorCodes[2] = "1CE6B9" //teal
+        set colorCodes[3] = "540081" //purple
+        set colorCodes[4] = "FFFC01" //yellow
+        set colorCodes[5] = "FEBA0E" //orange
+        set colorCodes[6] = "20C000" //green
+        set colorCodes[7] = "FF00FF" //pink
+        set colorCodes[8] = "808080" //grey
+        set colorCodes[9] = "0080FF" //light blue
+        set colorCodes[10] = "008000" //dark green
+        set colorCodes[11] = "800000" //brown
+
+        set t = null
+    endfunction
+endlibrary
