@@ -1,0 +1,173 @@
+function createChallengeQuests takes nothing returns nothing
+    quest q
+    string s
+    
+    //Rules
+    q = CreateQuest()
+    QuestSetRequired(q, false)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\CommandButtons\\BTNDefend.blp")
+    QuestSetTitle(q, "Challenge Rules")
+    s = ""
+    s += "Replays are kept but currently aren't posted anywhere.\n"
+    QuestSetDescription(q, s)
+    CreateQuestItemBJ(q, "Email replays to |cFFFFCC00cr376499@dal.ca|r to enter.")
+    CreateQuestItemBJ(q, "The first 5 to complete a challenge get their names here.")
+    CreateQuestItemBJ(q, "The number by challenges is the number of spots left.")
+    CreateQuestItemBJ(q, "(-) = closed, (#) = highscore challenge")
+
+    //Leech
+    q = CreateQuest()
+    QuestSetRequired(q, false)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\WorldEditUI\\Editor-Force.blp")
+    QuestSetTitle(q, "(1) Leech")
+    s = ""
+    s += "1st: Anduril33b\n"
+    s += "2nd: GTO_BOY\n"
+    s += "3rd: Mastersined\n"
+    s += "4th: VigorousApathy\n"
+    s += "5th: -\n"
+    QuestSetDescription(q, s)
+    CreateQuestItemBJ(q, "|cFFFFCC00Beat Corner Teams with a computer partner.|r")
+    CreateQuestItemBJ(q, "Use Elite/15 Rounds/Sudden Death/Fair Income")
+
+    //Indy 15
+    q = CreateQuest()
+    QuestSetRequired(q, false)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\WorldEditUI\\Editor-Force.blp")
+    QuestSetTitle(q, "(-) Indy 15")
+    s = ""
+    s += "1st: Shiladie - 7m 02s\n"
+    s += "2nd: Mastersined - 9m 17s\n"
+    s += "3rd: -\n"
+    s += "4th: -\n"
+    s += "5th: -\n"
+    QuestSetDescription(q, s)
+    CreateQuestItemBJ(q, "|cFFFFCC00Finish Rookie/Solo/Race/15 Rounds/25 lives quickly|r")
+    CreateQuestItemBJ(q, "Time = The time displayed on the board when the game ends")
+    CreateQuestItemBJ(q, "closed due to version differences")
+
+    //Indy 30
+    q = CreateQuest()
+    QuestSetRequired(q, false)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\WorldEditUI\\Editor-Force.blp")
+    QuestSetTitle(q, "(-) Indy 30")
+    s = ""
+    s += "1st: tougo - 4m 19s\n"
+    s += "2nd: Shiladie - 5m 20s\n"
+    s += "3rd: Tougo - 8m 59s\n"
+    s += "4th: Anduril33b - 9m 44s\n"
+    s += "5th: _aH - 10m 7s\n"
+    QuestSetDescription(q, s)
+    CreateQuestItemBJ(q, "|cFFFFCC00Finish Noob/Solo/Race/30 Rounds/25 lives quickly|r")
+    CreateQuestItemBJ(q, "Time = The time displayed on the board when the game ends")
+    CreateQuestItemBJ(q, "closed due to version differences")
+
+    //Twins
+    q = CreateQuest()
+    QuestSetRequired(q, false)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\WorldEditUI\\Editor-Force.blp")
+    QuestSetTitle(q, "(-) Twins")
+    s = ""
+    s += "1st: rexk1\n"
+    s += "2nd: Shiladie, Anduril33b\n"
+    s += "3rd: zzaadd, fongy\n"
+    s += "4th: Kazrugore, NoPD.Sn4rs\n"
+    s += "5th: BattlelordVI, beelzarach\n"
+    QuestSetDescription(q, s)
+    CreateQuestItemBJ(q, "|cFFFFCC00Beat Sides/Elite/20 Rounds/Sudden Death with a partner|r")
+    CreateQuestItemBJ(q, "closed")
+
+    //The Quickest
+    q = CreateQuest()
+    QuestSetRequired(q, false)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\WorldEditUI\\Editor-Force.blp")
+    QuestSetTitle(q, "(-) The Quickest")
+    s = ""
+    s += "1st: Victor.GuN - 46 kills\n"
+    s += "2nd: Shiladie - 41 kills\n"
+    s += "3rd: Corex - 41 kills\n"
+    s += "4th: Sanji - 40 kills\n"
+    s += "5th: LightburneR - 30 kills\n"
+    QuestSetDescription(q, s)
+    CreateQuestItemBJ(q, "|cFFFFCC00Kill the most runners by yourself in elite coop round 1|r")
+    CreateQuestItemBJ(q, "Kills = Gold + Lumber - 35 after end of round 1")
+    CreateQuestItemBJ(q, "closed")
+
+    //The Cheapest
+    q = CreateQuest()
+    QuestSetRequired(q, false)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\WorldEditUI\\Editor-Force.blp")
+    QuestSetTitle(q, "(-) The Cheapest")
+    s = ""
+    s += "1st: he_kod - 989 dpg\n"
+    s += "2nd: DuLaNzZz - 830 dpg\n"
+    s += "3rd: Anduril33b - 687 dpg\n"
+    s += "4th: Axis - 617 dpg\n"
+    s += "5th: SouP - 440 dpg\n"
+    QuestSetDescription(q, s)
+    CreateQuestItemBJ(q, "|cFFFFCC00Deal the most damage/gold during the first round|r")
+    CreateQuestItemBJ(q, "Use solo/training mode in single player")
+    CreateQuestItemBJ(q, "Use 'greedisgood (number)' to get gold")
+    CreateQuestItemBJ(q, "closed due to version differences")
+
+    //Perfection
+    q = CreateQuest()
+    QuestSetRequired(q, false)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\WorldEditUI\\Editor-Force.blp")
+    QuestSetTitle(q, "(-) Perfection")
+    s = ""
+    s += "1st: ddelwood\n"
+    s += "2nd: rexk1\n"
+    s += "3rd: he_kod\n"
+    s += "4th: DuLaNzZz\n"
+    s += "5th: wtcr\n"
+    QuestSetDescription(q, s)
+    CreateQuestItemBJ(q, "|cFFFFCC00Beat Solo/Elite/30 Rounds/Sudden Death|r")
+    CreateQuestItemBJ(q, "closed")
+
+    //All 4 One
+    q = CreateQuest()
+    QuestSetRequired(q, false)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\WorldEditUI\\Editor-Force.blp")
+    QuestSetTitle(q, "(-) All 4 One")
+    s = ""
+    s += "1st: tossrock, RCoD.HorsedOnG, hornsbyRHINO\n"
+    s += "2nd: Warchamp7, ZanmatoZashi, Funkid2, TheSultan\n"
+    s += "3rd: aliengodz, Raides\n"
+    s += "4th: BilltheEmu, ShadowFlare_SFR, Zilla-\n"
+    s += "5th: Xar, Neoshan, Schichi\n"
+    QuestSetDescription(q, s)
+    CreateQuestItemBJ(q, "|cFFFFCC00Beat Coop/Veteran/15 Rounds/Sudden Death with 4 people|r")
+    CreateQuestItemBJ(q, "closed")
+
+    //Isolation
+    q = CreateQuest()
+    QuestSetRequired(q, false)
+    QuestSetDiscovered(q, true)
+    QuestSetIconPath(q, "ReplaceableTextures\\WorldEditUI\\Editor-Force.blp")
+    QuestSetTitle(q, "(-) Isolation")
+    s = ""
+    s += "1st: Platium\n"
+    s += "2nd: ZanmatoZashi\n"
+    s += "3rd: Warchamp7\n"
+    s += "4th: RedAzure\n"
+    s += "5th: Ubivin\n"
+    QuestSetDescription(q, s)
+    CreateQuestItemBJ(q, "|cFFFFCC00Beat Coop/Hotshot/15 Rounds/25 lives by yourself|r")
+    CreateQuestItemBJ(q, "closed")
+endfunction
+
+function InitTrig_Challenges takes nothing returns nothing
+    trigger t = CreateTrigger()
+    TriggerRegisterTimerEvent(t, 0, false)
+    TriggerAddAction(t, function createChallengeQuests)
+endfunction
