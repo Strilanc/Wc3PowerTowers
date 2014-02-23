@@ -1,0 +1,137 @@
+///Handles the help provided to players during the game.
+library libHelp initializer initHelp requires General, Decal, Constants, LibDefender, BlockCommandLib, LibMultiboard
+    globals
+        private constant integer HELP_STATE_BUILD_GENERATOR = 0
+        private constant integer HELP_STATE_BUILD_COMBAT = 1
+        private constant integer HELP_STATE_USE_TRANSFER = 2
+        private constant integer HELP_STATE_WATCH_POWER = 3
+        private constant integer HELP_STATE_WARNING_POWER = 4
+        private constant integer HELP_STATE_DONE = 5
+        private constant real INITIAL_HELP_DELAY = 20.0 //seconds
+        private constant real PERIODIC_HELP_DELAY = 10.0 //seconds
+        private integer array helpStateD
+        private boolean array blockFlagD
+        private boolean array sellFlagD
+    endglobals
+
+    ///Updates help state
+    private function catchBuild takes nothing returns nothing
+        local integer ut = GetUnitTypeId(GetConstructingStructure())
+        local Defender d = Defender.fromUnit(GetConstructingStructure())
+        local unit u = GetConstructingStructure()
+        local player p
+        local integer i
+        if d == 0 or ut == 0 then
+            return
+        endif
+
+        //building tips
+        if helpStateD[d.index] <= HELP_STATE_BUILD_GENERATOR then
+            if PowerData[ut].usageEstimate > 0 then
+                set helpStateD[d.index] = HELP_STATE_BUILD_COMBAT
+            endif
+        endif
+        if helpStateD[d.index] <= HELP_STATE_BUILD_COMBAT then
+            if PowerData[ut].usageEstimate < 0 then
+                set helpStateD[d.index] = HELP_STATE_USE_TRANSFER
+            endif
+        endif
+        
+        //command tips
+        set i = 1
+        loop
+            exitwhen i > NUM_DEFENDERS
+            set p = defenders[i].p
+            if not blockFlagD[i] and IsPlayerBlockingPlayer(p, d.p) then
+                if CanPlayerBlockAreaFrom(p, GetUnitX(u), GetUnitY(u), d.p) then
+                    call playSoundForPlayer(gg_snd_Hint, d.p)
+                    call DisplayTextToPlayer(p,0,0,"|cFF00FF00Tip: You can use|r |cFFFFCC00-block player_name|r|cFF00FF00 to remove players from your area.|r")
+                    set blockFlagD[i] = true
+                endif
+            endif
+            set i = i + 1
+        endloop
+        set u = null
+    endfunction
+    
+    ///Updates help state
+    private function catchCast takes nothing returns nothing
+        local Defender d
+        if GetSpellAbilityId() == AID_AddTransfer then
+            set d = Defender.fromUnit(GetTriggerUnit())
+            if d != 0 and helpStateD[d.index] <= HELP_STATE_USE_TRANSFER then
+                set helpStateD[d.index] = HELP_STATE_WATCH_POWER
+            endif
+        elseif GetSpellAbilityId() == ABIL_SELL then
+            set d = Defender.fromUnit(GetTriggerUnit())
+            if d != 0 and not sellFlagD[d.index] then
+                call playSoundForPlayer(gg_snd_Hint, d.p)
+                call DisplayTextToPlayer(d.p,0,0,"|cFF00FF00Tip: Your builder can use|r |cFFFFCC00Seller's Remorse|r|cFF00FF00 to restore recently sold towers.|r")
+                set sellFlagD[d.index] = true
+            endif            
+        endif
+    endfunction
+
+    ///Displays help to a defender
+    private function LoopHelp takes integer defender_arg returns nothing
+        local Defender d = Defender(defender_arg)
+        
+        //stop giving help when its no longer appropriate
+        if d.state != DEFENDER_STATE_DEFENDING then
+            set helpStateD[d.index] = HELP_STATE_DONE
+        endif
+        
+        //show tip
+        if helpStateD[d.index] == HELP_STATE_BUILD_GENERATOR then
+            call playSoundForPlayer(gg_snd_Hint, d.p)
+            call DisplayTextToPlayer(d.p,0,0,"|cFF00FF00Tip: Build a|r |cFFFFCC00furnace|r|cFF00FF00 so you can use decent towers.|r")
+        elseif helpStateD[d.index] == HELP_STATE_BUILD_COMBAT then
+            call playSoundForPlayer(gg_snd_Hint, d.p)
+            call DisplayTextToPlayer(d.p,0,0,"|cFF00FF00Tip: Build a|r |cFFFFCC00rock launcher |cFF00FF00or |cFFFFCC00tesla coil|r|cFF00FF00 near your furnace.|r")
+        elseif helpStateD[d.index] == HELP_STATE_USE_TRANSFER then
+            call playSoundForPlayer(gg_snd_Hint, d.p)
+            call DisplayTextToPlayer(d.p,0,0,"|cFF00FF00Tip: Select your furnace and cast|r |cFFFFCC00Add Transfer Target|r|cFF00FF00 on your tower.|r")
+        elseif helpStateD[d.index] == HELP_STATE_WATCH_POWER then
+            call playSoundForPlayer(gg_snd_Hint, d.p)
+            call DisplayTextToPlayer(d.p,0,0,"|cFF00FF00Tip: Keep an eye on your power supply or your towers will run dry.|r")
+            set helpStateD[d.index] = HELP_STATE_WARNING_POWER
+        elseif helpStateD[d.index] == HELP_STATE_WARNING_POWER then
+            if lastProducD[d.index]*2 + 40 < lastDrainD[d.index] then
+                call playSoundForPlayer(gg_snd_Hint, d.p)
+                call DisplayTextToPlayer(d.p,0,0,"|cFFFF6000Warning: You need more power to feed your towers! Upgrade or make more generators!|r")
+                set helpStateD[d.index] = HELP_STATE_DONE
+            endif
+        endif
+        
+        //wait before repeating the help
+        if helpStateD[d.index] != HELP_STATE_DONE then
+            call schedule_integer(Action_integer.LoopHelp, PERIODIC_HELP_DELAY, integer(d))        
+        endif
+    endfunction
+    
+    ///Starts the help loop for all defenders
+    private function StartHelpLoop takes nothing returns nothing
+        local integer i = 1
+        loop
+            exitwhen i > NUM_DEFENDERS
+
+            call schedule_integer(Action_integer.LoopHelp, 0., integer(defenders[i]))
+            set i = i + 1
+        endloop
+    endfunction
+    
+    ///Initializes the structure events
+    private function initHelp takes nothing returns nothing
+        local trigger t
+        
+        call schedule(Action.StartHelpLoop, INITIAL_HELP_DELAY)
+        
+        set t = CreateTrigger()
+        call TriggerAddAction(t, function catchBuild)
+        call TriggerRegisterAnyUnitEventBJ(t, EVENT_PLAYER_UNIT_CONSTRUCT_START)
+
+        set t = CreateTrigger()
+        call TriggerRegisterAnyUnitEventBJ(t, EVENT_PLAYER_UNIT_SPELL_CAST)
+        call TriggerAddAction(t, function catchCast)
+    endfunction
+endlibrary
