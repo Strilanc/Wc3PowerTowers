@@ -9,7 +9,7 @@ The map is heavily influenced by Cube Defense, with a focus on mazing and intera
 
 ![Top down view](http://i.imgur.com/LQSOnly.png)
 
-Towers sell for 100% of their cost, encouraging constant reworking of your maze. This is especially important in the higher difficulties. The maze shown below is relatively inexpensive, but likely won't be good enough for the next round because in round 5 runners have bonus speed:
+Towers sell for 100% of their cost, encouraging constant reworking of your maze. This is especially important in the higher difficulties. The maze shown below is relatively inexpensive and causes the runners to pass twice, but it won't be good enough for the next round on elite difficulty because in round 5 runners have bonus speed. Also, if player 8 was present, you would be splitting damage over runners that weren't yours:
 
 ![Mazing](http://i.imgur.com/gzSPlH3.png)
 
