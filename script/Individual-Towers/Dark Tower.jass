@@ -1,0 +1,7 @@
+library UnitDarkTower initializer init requires DataCreation
+    private ShortList uids
+    private function init takes nothing returns nothing
+        uids = ShortList.create6('h00F', 'h02V', 'h02W', 'h02X', 'h02Y', 'h02Z')
+        CreateCombatSetData(uids, AttackCastType_Unit, 'A00G', OrderId("innerfire"))
+    endfunction
+endlibrary
