@@ -1,0 +1,7 @@
+library UnitGraveyard initializer init requires DataCreation
+    private ShortList uids
+    private function init takes nothing returns nothing
+        uids = ShortList.create6('h036', 'h037', 'h038', 'h039', 'h03A', 'h03B')
+        CreateGeneratorSetData(uids, 'A00I', 5, 45)
+    endfunction
+endlibrary
