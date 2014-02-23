@@ -1,0 +1,322 @@
+///Strilanc's library
+///Contains functions and macros I use all the time.
+///The usefulness of stuff ranges from "actually useful" to "renamed function"
+library General initializer init
+    constant string chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890:. |!"
+    constant integer numChars = StringLength(chars)
+    private hashtable data = InitHashtable()
+    boolexpr NO_FILTER = null
+    private group array groups
+    private integer numStackedGroups = 0
+    private constant integer MAX_STACKED_GROUPS = 64
+    private constant integer HALF_STACKED_GROUPS = MAX_STACKED_GROUPS/2
+    private rect lastOneTimeRect = null
+    private string array colorCodes
+        
+    function OneTimeRect takes rect r returns rect
+        RemoveRect(lastOneTimeRect)
+        lastOneTimeRect = r
+        return r
+    endfunction
+        
+    function TopGroup takes nothing returns group
+        return groups[numStackedGroups-1]
+    endfunction
+    function StackGroup takes nothing returns group
+        integer i
+        if numStackedGroups >= MAX_STACKED_GROUPS then
+            BJDebugMsg("StackGroup Warning: Stack overflow. Cleared oldest groups.")
+            i = 0
+            loop
+                exitwhen i >= HALF_STACKED_GROUPS
+                DestroyGroup(groups[i])
+                groups[i] = groups[i+HALF_STACKED_GROUPS]
+                groups[i+HALF_STACKED_GROUPS] = null
+                i = i + 1
+            endloop
+        endif
+        
+        if groups[numStackedGroups] == null then
+            groups[numStackedGroups] = CreateGroup()
+        endif
+        numStackedGroups = numStackedGroups + 1
+        return groups[numStackedGroups-1]
+    endfunction
+    function PopGroup takes nothing returns nothing
+        numStackedGroups = numStackedGroups - 1
+        GroupClear(groups[numStackedGroups])
+    endfunction
+
+    //===============================================================
+    //= PLAYERS =====================================================
+    //===============================================================
+    ///Returns the color code for the given player
+    function getPlayerColor takes player p returns string
+        string s = null
+        if p != null then
+            s = colorCodes[GetPlayerId(p)]
+        endif
+        if s == null or s == "" then
+            s = "FFFFFF" //white
+        endif
+        return "FF" + s
+    endfunction
+    ///Returns the colored name of the given player
+    function getPlayerColoredName takes player p returns string
+        if p == null then
+            return ""
+        endif
+        return "|c" + getPlayerColor(p) + GetPlayerName(p) + "|r"
+    endfunction
+    private function InitPlayerData takes nothing returns nothing
+        integer i
+        
+        colorCodes[0] = "FF0303" //red
+        colorCodes[1] = "0042FF" //blue
+        colorCodes[2] = "1CE6B9" //teal
+        colorCodes[3] = "540081" //purple
+        colorCodes[4] = "FFFC01" //yellow
+        colorCodes[5] = "FEBA0E" //orange
+        colorCodes[6] = "20C000" //green
+        colorCodes[7] = "FF00FF" //pink
+        colorCodes[8] = "808080" //grey
+        colorCodes[9] = "0080FF" //light blue
+        colorCodes[10] = "008000" //dark green
+        colorCodes[11] = "800000" //brown
+
+        //name
+        i = 0
+        loop
+            exitwhen i >= 12
+            SaveInteger(data, 2, StringHash(StringCase(GetPlayerName(Player(i)), false)), i+1)
+            i = i + 1
+        endloop
+
+        //color
+        SaveInteger(data, 2, StringHash("red"), 1)
+        SaveInteger(data, 2, StringHash("blue"), 2)
+        SaveInteger(data, 2, StringHash("teal"), 3)
+        SaveInteger(data, 2, StringHash("purple"), 4)
+        SaveInteger(data, 2, StringHash("yellow"), 5)
+        SaveInteger(data, 2, StringHash("orange"), 6)
+        SaveInteger(data, 2, StringHash("green"), 7)
+        SaveInteger(data, 2, StringHash("pink"), 8)
+        SaveInteger(data, 2, StringHash("gray"), 9)
+        SaveInteger(data, 2, StringHash("light blue"), 10)
+        SaveInteger(data, 2, StringHash("dark green"), 11)
+        SaveInteger(data, 2, StringHash("lightblue"), 10)
+        SaveInteger(data, 2, StringHash("darkgreen"), 11)
+        SaveInteger(data, 2, StringHash("lb"), 10)
+        SaveInteger(data, 2, StringHash("dg"), 11)
+        SaveInteger(data, 2, StringHash("brown"), 12)
+    endfunction
+    ///Returns the player with the given color, name or number
+    function getPlayerFromString takes string s returns player
+        integer i = LoadInteger(data, 2, StringHash(StringCase(s, false)))
+        if i > 0 then
+            return Player(i - 1)
+        endif
+        return null
+    endfunction
+    
+    //===============================================================
+    //= MATH ========================================================
+    //===============================================================
+    ///Returns the value of a 3rd degree polynomial
+    function polynom3 takes real x, integer coef0, integer coef1, integer coef2, integer coef3 returns real
+        return coef0 + x*(coef1 + x*(coef2 + x*coef3))
+    endfunction
+
+    ///Returns true with probability p
+    function chance takes real p returns boolean
+        return GetRandomReal(0, 1) < p
+    endfunction
+
+    ///Returns the middle value
+    function between takes integer x1, integer x2, integer x3 returns integer
+        //recursively sort
+        if x1 > x3 then
+            return between(x3, x2, x1)
+        elseif x1 > x2 then
+            return between(x2, x1, x3)
+        elseif x3 < x2 then
+            return between(x1, x3, x2)
+        endif
+        //guaranteed x2 between x1 and x3 at this point
+        return x2
+    endfunction
+
+    ///Returns first integer at most as large as r
+    function floor takes real r returns integer
+        integer i = R2I(r)
+        if i > r then
+            return i-1
+        else
+            return i
+        endif
+    endfunction
+    ///Returns first integer at least as large as r
+    function ceiling takes real r returns integer
+        integer i = R2I(r)
+        if i < r then
+            return i+1
+        else
+            return i
+        endif
+    endfunction
+    ///Returns the integer you get by rounding r
+    function round takes real r returns integer
+        return floor(r+0.5)
+    endfunction
+    ///Returns the integer you get by cutting off the digits after the decimal point in r
+    function truncate takes real r returns integer
+        return R2I(r)
+    endfunction
+
+    ///Returns the sign of a number
+    function sgn takes real r returns integer
+        if r > 0 then
+            return 1
+        elseif r < 0 then
+            return -1
+        else
+            return 0
+        endif
+    endfunction
+
+    //=================================================================
+    //= VISUALS =======================================================
+    //=================================================================
+    ///Creates a dying special effect, no need for cleanup
+    function createBang takes real x, real y, string model returns nothing
+        DestroyEffect(AddSpecialEffect(model, x, y))
+    endfunction
+
+    ///Shows fading floating-text above a unit
+    function showUnitText takes unit u, string msg returns nothing
+        texttag t
+        if u == null then; return; endif
+        t = CreateTextTag()
+        SetTextTagText(t, msg, 0.023)
+        SetTextTagPos(t, GetUnitX(u)+GetRandomReal(-25, 25), GetUnitY(u)+GetRandomReal(-25, 25), 0)
+        SetTextTagLifespan(t, 3)
+        SetTextTagPermanent(t, false)
+        SetTextTagFadepoint(t, 1)
+        SetTextTagVelocity(t, 0, 0.023)
+        t = null
+    endfunction
+    function showUnitTextToPlayer takes unit u, string msg, player p returns nothing
+        texttag t
+        if u == null then; return; endif
+        t = CreateTextTag()
+        SetTextTagText(t, msg, 0.023)
+        SetTextTagPos(t, GetUnitX(u)+GetRandomReal(-25, 25), GetUnitY(u)+GetRandomReal(-25, 25), 0)
+        SetTextTagLifespan(t, 3)
+        SetTextTagPermanent(t, false)
+        SetTextTagFadepoint(t, 1)
+        SetTextTagVelocity(t, 0, 0.023)
+        SetTextTagVisibility(t, GetLocalPlayer() == p)
+        t = null
+    endfunction
+
+    ///Plays a sound, but for one player instead of all of them
+    function playSoundForPlayer takes sound s, player p returns nothing
+        if GetLocalPlayer() == p then
+            StartSound(s)
+        endif
+    endfunction
+
+    //=================================================================
+    //= CONVERSIONS ===================================================
+    //=================================================================
+    ///Converts an integer to a character
+    function I2Char takes integer i returns string
+        if i < 0 or i >= numChars then
+            return " "
+        endif
+        return SubString(chars, i, i+1)
+    endfunction
+    ///Converts a character to an integer
+    function Char2I takes string c returns integer
+        if c == StringCase(c, true) then
+            return LoadInteger(data, 0, StringHash(c))
+        else
+            return LoadInteger(data, 1, StringHash(c))
+        endif
+    endfunction
+    ///Initializes the char-to-int conversion
+    private function prepChar2I takes nothing returns nothing
+        integer i = 0
+        string c
+        loop
+            exitwhen i >= numChars
+            c = SubString(chars, i, i+1)
+            if c == StringCase(c, true) then
+                SaveInteger(data, 0, StringHash(c), i)
+            else
+                SaveInteger(data, 1, StringHash(c), i)
+            endif
+            i = i + 1
+        endloop
+    endfunction
+
+    ///Encodes a string
+    function encode takes integer d, string s returns string
+        string ret = ""
+        integer m = 1
+        integer c
+        integer n = StringLength(s)
+        integer i
+        loopForIntBelow(i, n)
+            m *= d
+            m -= (m / numChars) * numChars
+            c = m * Char2I(SubString(s, i, i+1))
+            c -= (c / numChars) * numChars
+            ret += SubString(chars, c, c+1)
+        endloop
+        return ret
+    endfunction
+
+    //=================================================================
+    //= MACROS ========================================================
+    //=================================================================
+    ///Shorthand for making a structure permanent (only provides warnings, almost no compile-time enforcement)
+    //! textmacro EnforcePermanent takes StructureName
+        private method onDestroy takes nothing returns nothing
+            call BJDebugMsg("Map Error: Destroyed a permanent structure. ($StructureName$.onDestroy)")
+        endmethod
+    //! endtextmacro
+
+    ///Shorthand for making a structure static (only provides warnings, partial compile-time enforcement)
+    //! textmacro EnforceStatic takes StructureName
+        private method onDestroy takes nothing returns nothing
+            call BJDebugMsg("Map Error: Destroyed a static structure. ($StructureName$.onDestroy)")
+        endmethod
+        private static method create takes nothing returns $StructureName$
+            call BJDebugMsg("Map Error: Attempted to instanciate a static structure. ($StructureName$.create)")
+            return 0
+        endmethod
+    //! endtextmacro
+
+    ///Shorthand for creating a method which redirects to init and can only be called once.
+    //! textmacro CreateInitOnceMethod takes StructureName
+        private static boolean initialized = false
+        public static method initonce takes nothing returns nothing
+            if $StructureName$.initialized then
+                call BJDebugMsg("Map Error: Attempted to initialize a structure twice. ($StructureName$.initonce)")
+                return
+            endif
+            set $StructureName$.initialized = true
+            call $StructureName$.init()
+        endmethod
+    //! endtextmacro
+
+    private function truth takes nothing returns boolean
+        return true
+    endfunction
+    private function init takes nothing returns nothing
+        prepChar2I()
+        InitPlayerData()
+        NO_FILTER = Condition(function truth)
+    endfunction
+endlibrary
