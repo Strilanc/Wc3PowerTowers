@@ -1,0 +1,108 @@
+///////////////////////////////////////////////////////
+/// Strilanc's Group Event Library
+/// Last Updated: February 28, 2009
+/// Version: 1.02
+///////////////////////////////////////////////////////
+/// Summary:
+///  - Manages the work required for applying a unit event to a subset of units on the map.
+///
+/// Explanation:
+///  - When units are added, they get their own trigger and event. Old units are checked for
+///  decay as more units are added, guaranteeing good performance and no memory leaks.
+///
+/// Interface:
+///  - GroupEvent.create(unitevent id, code callback)
+///  - .AddUnit(unit u)
+///  - .AddGroup(group g)
+///  - .AddUnitsMatching(boolexpr filter)
+///////////////////////////////////////////////////////
+
+library GEV uses Decal
+    function DestroyTrigger2 takes trigger t returns nothing
+        call DestroyTrigger(t)
+    endfunction
+    
+    //! textmacro CreateGroupEvent takes name, eventid, callback
+        globals
+            private keyword $name$__EventNode
+            private $name$__EventNode $name$__node = 0
+        endglobals
+                
+        ///Circular Double Linked List Node which stores a unit and its event trigger.
+        private struct $name$__EventNode
+            readonly $name$__EventNode next
+            readonly $name$__EventNode prev
+            readonly unit u
+            private trigger t
+            
+            public static method create takes unit u, $name$__EventNode next returns $name$__EventNode
+                local $name$__EventNode this = $name$__EventNode.allocate()            
+                set .u = u
+                set .t = CreateTrigger()
+                call TriggerAddAction(.t, $callback$)
+                call TriggerRegisterUnitEvent(.t, u, $eventid$)
+                
+                //insert in circular list
+                if next == 0 then
+                    set next = this
+                endif
+                set .next = next
+                set .prev = next.prev
+                set .next.prev = this
+                set .prev.next = this
+
+                return this
+            endmethod
+            
+            private method onDestroy takes nothing returns nothing
+                call DisableTrigger(.t)
+                call schedule_trigger(Action_trigger.DestroyTrigger2, 60, .t)
+                set .u = null
+                set .t = null
+                //remove from circular list
+                set .next.prev = .prev
+                set .prev.next = .next
+            endmethod
+        endstruct
+        
+        ///Checks one unit for decay
+        private function $name$__filter takes nothing returns nothing
+            local $name$__EventNode next_node
+            if $name$__node != 0 then
+                set next_node = $name$__node.next
+                if GetUnitTypeId($name$__node.u) == 0 then
+                    if $name$__node.next == $name$__node then
+                        set next_node = 0
+                    endif
+                    call $name$__node.destroy()
+                endif
+                set $name$__node = next_node
+            endif
+        endfunction
+            
+        public function $name$AddUnit takes unit u returns nothing
+            set $name$__node = $name$__EventNode.create(u, $name$__node).next
+            call $name$__filter()
+            call $name$__filter()
+        endfunction
+
+        ///=== Utility functions
+        private function $name$__addEnumUnit takes nothing returns nothing
+            call $name$AddUnit(GetEnumUnit())
+        endfunction
+        public function $name$AddGroup takes group g returns nothing
+            call ForGroup(g, function $name$__addEnumUnit)
+        endfunction
+        public function $name$AddUnitsMatching takes boolexpr filter returns nothing
+            local rect r = GetWorldBounds()
+            local group g = CreateGroup()
+            call GroupEnumUnitsInRect(g, r, filter)
+            call RemoveRect(r)
+            set r = null
+            call $name$AddGroup(g)
+            call GroupClear(g)
+            call DestroyGroup(g)
+            set g = null
+        endfunction
+    //! endtextmacro
+endlibrary
