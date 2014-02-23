@@ -1,0 +1,7 @@
+library UnitBarracks initializer init requires DataCreation
+    private ShortList uids
+    private function init takes nothing returns nothing
+        uids = ShortList.create1('h044')
+        CreateGeneratorSetData(uids, 0, 0, 0)
+    endfunction
+endlibrary
