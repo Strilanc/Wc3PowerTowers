@@ -1,0 +1,7 @@
+library UnitChemicalTower initializer init requires DataCreation
+    private ShortList uids
+    private function init takes nothing returns nothing
+        uids = ShortList.create6('h001', 'h00R', 'h00S', 'h00T', 'h00V', 'h00U')
+        CreateCombatSetData(uids, AttackCastType_Unit, 'A00A', OrderId("shadowstrike"))
+    endfunction
+endlibrary
