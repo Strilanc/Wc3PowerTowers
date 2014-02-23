@@ -1,0 +1,79 @@
+///Removes the preloaded units, sets up the environment, and shows the menus.
+library LibStartup initializer init requires General, LibDefender, HCL, MMD, ModeCommands
+    private player host
+    private constant integer ABIL_SHOW_MENU = 'A00V'
+    
+    function OnStartupTimeOver takes nothing returns nothing
+        UnitRemoveAbility(Defender[host].builder, ABIL_SHOW_MENU)
+        ShowCommandDialog(host, 0)
+    endfunction
+    
+    private function OnLeave takes nothing returns nothing
+        if Game.state == GAME_STATE_INTRO and GetTriggerPlayer() == host then
+            host = Defender.getMainDefender().p
+            UnitAddAbility(Defender[host].builder, ABIL_SHOW_MENU)
+            print("Mode control passed to " + Defender.getMainDefender().getNameWithColor() + ".")
+        endif
+    endfunction
+    
+    private function OnChat takes nothing returns nothing
+        string s = StringCase(GetEventPlayerChatString(), false)
+        if Game.state == GAME_STATE_INTRO and GetTriggerPlayer() == host and SubString(s, 0, 1) == "-" then
+            InterpretLine(s)
+        endif
+    endfunction
+    
+    private function OnCast takes nothing returns nothing
+        if GetSpellAbilityId() == ABIL_SHOW_MENU then
+            ShowCommandDialog(GetTriggerPlayer(), 1)
+        endif
+    endfunction
+    
+    ///Prepares the map, fades in, and shows menu
+    private function startup takes nothing returns nothing
+        //Remove preloaded units
+        GroupEnumUnitsOfPlayer(StackGroup(), RUNNERS_OWNER, NO_FILTER)
+        UnitAddAbility(FirstOfGroup(TopGroup()), ABIL_MAX_LIFE_MODIFIER) //preload maxhp ability
+        unit u
+        loopThroughUnitGroupDestructive(u, TopGroup())
+            RemoveUnit(u)
+        endloop
+        PopGroup()
+
+        //Set ambiance
+        SetFloatGameState(GAME_STATE_TIME_OF_DAY, 12)
+        SetTimeOfDayScale(0)
+        FogEnable(false)
+        FogMaskEnable(false)
+
+        //Fade in
+        CinematicFadeBJ(bj_CINEFADETYPE_FADEIN, 1.00, "ReplaceableTextures\\CameraMasks\\Black_mask.blp", 0, 0, 0, 0)
+        print("You can start building while " + Defender.getMainDefender().getNameWithColor() + " chooses the game type.")
+        
+        //Pass control on player leave
+        AddPlayerEventHandler(EVENT_PLAYER_LEAVE, function OnLeave)
+    
+        MMD_DefineEvent2("FinishedRound", "{0} finished round {1}", "pid:player", "round")
+        MMD_DefineEvent1("LostLife", "{0} lost a life", "pid:player")
+        MMD_DefineEvent1("Mode", "Mode -{0}", "mode")
+
+        host = Defender.getMainDefender().p
+        if HCL_GetCommandString() == "" then
+            //No auto mode. Use chat commands.
+            AddChatEventHandler("-", false, function OnChat)
+            UnitAddAbility(Defender[host].builder, ABIL_SHOW_MENU)
+        else
+            //Auto mode specified.
+            BJDebugMsg("Mode --" + HCL_GetCommandString() + " entered by Host Bot.")
+            InterpretAbrev(HCL_GetCommandString())
+            StartMultiboard2()
+        endif
+    endfunction
+
+    ///Instantly fades to black and queues starting the map (allow everything else to initialize first)
+    private function init takes nothing returns nothing
+        CinematicFadeBJ(bj_CINEFADETYPE_FADEOUT, 0.00, "ReplaceableTextures\\CameraMasks\\Black_mask.blp", 0, 0, 0, 0)
+        schedule(Action.startup, 0.50)
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_SPELL_EFFECT, function OnCast)
+    endfunction
+endlibrary
