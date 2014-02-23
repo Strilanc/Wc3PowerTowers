@@ -1,0 +1,460 @@
+///This structure represents a team of defenders. It is in charge of a lot
+///of things Game used to be in charge of, such as ending rounds, starting
+///rounds, victory/defeat, some spawning, etc. It is also in charge of
+///lives, has a bunch of useful methods for counting runners, and tracks
+///all allocated teams in a static array.
+library LibTeam initializer initTeam requires General, Constants, Special, LibDefender, SpawnLib
+    constant integer ROUND_STATE_NONE = 0
+    constant integer ROUND_STATE_RUNNING = 1
+    constant integer ROUND_STATE_COMPLETED = 2
+
+    constant integer TEAM_STATE_WAITING = 1
+    constant integer TEAM_STATE_DEFENDING = 2
+    constant integer TEAM_STATE_DONE_ROUND = 3
+    constant integer TEAM_STATE_DEAD = 4
+    
+    //! runtextmacro CreatePair("TeamRound", "Team", "team", "integer", "newRound")
+    private function TeamTryStartNextRound takes integer arg_team_round returns nothing
+        Pair_TeamRound ptr = arg_team_round
+        Team team = ptr.team
+        integer newRound = ptr.newRound
+        ptr.destroy()
+        //don't double start rounds
+        if newRound != team.maxRound+1 then; return; endif
+        team.startNextRound()
+    endfunction
+    
+    struct Round
+        readonly static integer numAllocated = 0
+        readonly integer r
+        readonly SpawnSet s
+        readonly Team t
+        readonly static Round array map
+        public static method create takes Team team, SpawnSet spawns, integer rnd returns Round
+            Round r
+            if Round.map[integer(spawns)] != 0 then
+                BJDebugMsg("Map Error: Round created twice for the same spawn set. (Round.create)")
+                return 0
+            endif
+            r = Round.allocate()
+            r.r = rnd
+            r.s = spawns
+            r.t = team
+            Round.map[integer(spawns)] = r
+            Round.numAllocated = Round.numAllocated + 1
+            return r
+        endmethod
+        private method onDestroy takes nothing returns nothing
+            Round.map[integer(.s)] = 0
+            .s.destroy()
+            .s = 0
+            .t = 0
+            .r = 0
+            Round.numAllocated = Round.numAllocated - 1
+        endmethod
+    endstruct
+
+    struct Team
+        readonly static integer numAllocated = 0
+        readonly static Team array teams
+        readonly integer arrayIndex = 0
+        readonly static integer racePositions = 0
+        
+        readonly Defender array members[NUM_DEFENDERS]
+        readonly integer numMembers = 0
+        readonly force memberForce = CreateForce()
+        readonly integer state
+        readonly integer lives = 0
+        private integer incomeDivideIndex = 1
+
+        readonly integer array roundStates[MAX_ROUNDS]
+        readonly integer minRound = 0
+        readonly integer maxRound = 0
+        private timer roundTimer
+        private timerdialog roundTimerDialog
+
+        //=====================================
+        //=== PROPERTIES ======================
+        //=====================================
+        ///Returns the number of living members in this team
+        public method countLivingMembers takes nothing returns integer
+            integer i
+            integer n
+            macro_NullGuard(0)
+            if .state == TEAM_STATE_DEAD then; return 0; endif
+
+            //find a living member
+            n = 0
+            loopForIntBelow(i, this.numMembers)
+                if .members[i+1].state == DEFENDER_STATE_DEFENDING then
+                    n += 1
+                endif
+            endloop
+
+            return n
+        endmethod
+
+        ///Returns the number of living teams
+        public static method countLivingTeams takes nothing returns integer
+            integer i
+            integer n
+
+            n = 0
+            loopForIntBelow(i, Team.numAllocated)
+                if Team.teams[i+1].state != TEAM_STATE_DEAD then
+                    n += 1
+                endif
+            endloop
+
+            return n
+        endmethod
+
+        ///Returns a name for the team (made up of the member names)
+        public method getName takes nothing returns string
+            if this == 0 then
+                return ""
+            elseif this.numMembers >= NUM_DEFENDERS then
+                return "Everyone"
+            endif
+
+            integer i; i = 2
+            string s; s = .members[1].getNameWithColor()
+            loop
+                exitwhen i > .numMembers
+                s = s + ", " + .members[i].getNameWithColor()
+                i = i + 1
+            endloop
+
+            return s
+        endmethod
+
+        //=====================================
+        //=== MUTATERS ========================
+        //=====================================
+        public method setLives takes integer n returns nothing
+            integer i
+            integer dn = n - .lives
+            macro_NullGuard()
+            .lives = n
+            loopForIntBelow(i, this.numMembers)
+                Defender d; d = .members[i+1]
+                SetPlayerState(d.p, PLAYER_STATE_RESOURCE_FOOD_USED, .lives)
+            endloop
+        endmethod
+        ///Takes a life from the team and kills its members if lives run out
+        public method loseLife takes nothing returns boolean
+            integer i
+            Defender d
+            if this == 0 or this.lives <= 0 or this.state == TEAM_STATE_DEAD then
+                return false
+            endif
+
+            //take the life
+            .setLives(.lives-1)
+            loopForIntBelow(i, this.numMembers)
+                MMD_LogEvent1("LostLife", I2S(GetPlayerId(.members[i+1].p)))
+            endloop
+
+            //show messages
+            if .lives <= 0 then
+                DisplayTextToPlayer(GetLocalPlayer(),0,0, .getName() + " has been defeated.")
+                .kill()
+            else
+                DisplayTextToPlayer(GetLocalPlayer(),0,0, .getName() + " lost a life! (" + I2S(.lives) + " left)")
+            endif
+
+            return true
+        endmethod
+
+        ///Show a message only to this team
+        public method ShowTeamMessage takes string s returns nothing
+            macro_NullGuard()
+            if IsPlayerInForce(GetLocalPlayer(), .memberForce) then
+                DisplayTextToPlayer(GetLocalPlayer(), 0, 0, s)
+            endif
+        endmethod
+
+        ///Get the next member set to recieve income (and the next on the call after that...)
+        public method getNextIncomeDefender takes nothing returns Defender
+            integer i
+            if this == 0 or .numMembers <= 0 or .state == TEAM_STATE_DEAD then
+                return 0
+            endif
+
+            //find next living member
+            i = .incomeDivideIndex
+            loop
+                i = ModuloInteger(i, .numMembers) + 1
+                if .members[i].state == DEFENDER_STATE_DEFENDING then
+                    .incomeDivideIndex = i
+                    return .members[i]
+                endif
+                exitwhen i == .incomeDivideIndex //looped all the way 'round
+            endloop
+
+            //no living members
+            return 0
+        endmethod
+        
+        ///Starts the next round for this team
+        public method startNextRound takes nothing returns boolean
+            macro_NullGuard(false)
+            if .state == TEAM_STATE_DEAD then; return false; endif
+
+            //start the next round
+            TimerDialogDisplay(.roundTimerDialog, false)
+            if .minRound == .maxRound and .roundStates[.minRound] == ROUND_STATE_COMPLETED then
+                .minRound += 1
+            endif
+            .maxRound += 1
+            Round r; r = Round.create(this, SpawnSet.create(), .maxRound)            
+            integer i
+            loopForIntBelow(i, .numMembers)
+                Defender d; d = .members[i+1]
+                SpawnBase s; s = PowerTowersSpawn.createDefault(d, r.s, r.r)
+                d.stream.spawnMultiple(s, SPAWNS_PER_ROUND, SPAWN_PERIOD)
+                s.destroy()
+            endloop
+            .state = TEAM_STATE_DEFENDING
+            .roundStates[.maxRound] = ROUND_STATE_RUNNING
+            
+            //alerts
+            .ShowTeamMessage("Round " + I2S(.maxRound))
+            if isSpeedRound(.maxRound) then
+                .ShowTeamMessage("Runners have |cFFFF0000Speed|r")
+            endif
+            if isFeedbackRound(.maxRound) then
+                .ShowTeamMessage("Runners have |cFF80FF00Feedback|r")
+            endif
+            if isShieldRound(.maxRound) then
+                .ShowTeamMessage("Runners have |cFFFFCC00Divine Shield|r")
+            endif
+            if .maxRound > MAX_ROUNDS then
+                .ShowTeamMessage("Runner health is |cFFFF0080Increasing Exponentially|r")
+            endif
+
+            UpdateMultiboard()
+            return true
+        endmethod
+
+        public method startNextRoundCountdown takes nothing returns boolean
+            macro_NullGuard(false)
+            if .state == TEAM_STATE_DEAD then; return false; endif
+            if .maxRound >= Game.numRounds then; return false; endif
+            if Game.numRounds == GAME_LENGTH_LAST_MAN and Team.countLivingTeams() <= 1 then; return false; endif
+            if .state == TEAM_STATE_DONE_ROUND then
+                .state = TEAM_STATE_WAITING
+            endif
+            real delay
+            if Game.rushedRounds then
+                delay = RUSHED_ROUND_WAIT_TIME
+            else
+                delay = ROUND_WAIT_TIME
+            endif
+            TimerStart(.roundTimer, delay, false, null)
+            TimerDialogDisplay(.roundTimerDialog, IsPlayerInForce(GetLocalPlayer(), .memberForce))
+            schedule_integer(Action_integer.TeamTryStartNextRound, delay, Pair_TeamRound.create(this, .maxRound+1))
+            return true
+        endmethod
+
+        public method distributeGold takes integer gold returns nothing
+            integer i
+            integer n = .countLivingMembers()
+            integer dGold
+            macro_NullGuard()
+            if gold <= 0 then; return; endif
+            loopForIntBelow(i, .numMembers)
+                if .members[i+1].state == DEFENDER_STATE_DEFENDING then
+                    dGold = gold/n
+                    AdjustPlayerStateBJ(dGold, .members[i+1].p, PLAYER_STATE_RESOURCE_GOLD)
+                    DisplayTextToPlayer(.members[i+1].p,0,0,"|cFFFFCC00+" + I2S(dGold) + " Gold|r")
+                    gold -= dGold
+                    n -= 1
+                endif
+            endloop
+        endmethod
+        
+        public method completeRound takes integer r returns nothing
+            integer i
+            integer roundTech = 0
+            Defender d
+            if this == 0 or .roundStates[r] != ROUND_STATE_RUNNING then
+                return
+            elseif .state != TEAM_STATE_DEFENDING and .state != TEAM_STATE_DEAD then
+                return
+            endif
+
+            //reward
+            if .state != TEAM_STATE_DEAD then
+                .ShowTeamMessage("Round " + I2S(r) + " Completed!")
+                if Game.inherit_income then
+                    .distributeGold(getRoundFinishBounty(r) * .numMembers)
+                else
+                    .distributeGold(getRoundFinishBounty(r) * .countLivingMembers())
+                endif
+
+                //tech
+                if r == 1 then
+                    roundTech = RESEARCH_ROUND_1
+                elseif r == 2 then
+                    roundTech = RESEARCH_ROUND_2
+                elseif r == 3 then
+                    roundTech = RESEARCH_ROUND_3
+                elseif r == 4 then
+                    roundTech = RESEARCH_ROUND_4
+                endif
+                loopForIntBelow(i, .numMembers)
+                    MMD_LogEvent2("FinishedRound", I2S(GetPlayerId(.members[i+1].p)), I2S(r))
+                    if roundTech != 0 then
+                        SetPlayerTechResearched(.members[i+1].p, roundTech, 1)
+                    endif
+                endloop
+                if not Game.syncedRounds then
+                    DisplayTextToPlayer(GetLocalPlayer(),0,0, .getName() + " finished round "  + I2S(r) + "!")
+                endif
+            endif
+
+            //team state
+            .roundStates[r] = ROUND_STATE_COMPLETED
+            loop
+                exitwhen .minRound >= .maxRound
+                exitwhen .roundStates[.minRound] != ROUND_STATE_COMPLETED
+                .minRound = .minRound + 1
+            endloop
+            if .minRound < .maxRound or .roundStates[.maxRound] != ROUND_STATE_COMPLETED then
+                return
+            endif
+            
+            //The team has completed all spawned rounds so far
+            if .state == TEAM_STATE_DEFENDING then
+                .state = TEAM_STATE_DONE_ROUND
+            endif
+            
+            //Check for race winner
+            if not Game.syncedRounds then
+                if .maxRound >= Game.numRounds then
+                    Team.racePositions = Team.racePositions + 1
+                    if Team.racePositions == 1 then
+                        MMD_FlagPlayer(Player(i), MMD_FLAG_WINNER)
+                    else
+                        MMD_FlagPlayer(Player(i), MMD_FLAG_LOSER)
+                    endif
+                    DisplayTextToPlayer(GetLocalPlayer(),0,0,.getName() + " finished in rank #" + I2S(Team.racePositions) + "!")
+                endif
+            endif
+
+            //Next round
+            if not Game.rushedRounds then
+                i = 1
+                loop
+                    exitwhen i > Team.numAllocated
+                    if Team.teams[i].state == TEAM_STATE_DEFENDING then
+                        return
+                    endif
+                    i += 1
+                endloop
+            endif
+            if Game.syncedRounds then
+                loopForIntBelow(i, Team.numAllocated)
+                    Team.teams[i+1].startNextRoundCountdown()
+                endloop
+            else
+                .startNextRoundCountdown()
+            endif
+        endmethod
+
+        private static method killDeadTeamRunners takes nothing returns nothing
+            Runner r = Runner.fromUnit(GetEnumUnit())
+            if r != 0 and r.owner.team.state == TEAM_STATE_DEAD then
+                KillUnit(r.u)
+            endif
+        endmethod
+        
+        public method kill takes nothing returns nothing
+            integer i
+            macro_NullGuard()
+            if .state == TEAM_STATE_DEAD then; return; endif
+            .state = TEAM_STATE_DEAD
+
+            //kill members
+            loopForIntBelow(i, .numMembers)
+                .members[i+1].kill()
+            endloop
+            
+            //kill runners
+            SpawnLib_ForEach(function Team.killDeadTeamRunners)
+        endmethod
+        
+        public method merge takes Team t returns boolean
+            integer i
+            macro_NullGuard(false)
+            if t == 0 then; return false; endif
+            
+            if .state == TEAM_STATE_DEAD then
+                .state = t.state
+            endif
+            loopForIntBelow(i, t.numMembers)
+                .numMembers += 1
+                .members[this.numMembers] = t.members[i+1]
+                ForceAddPlayer(.memberForce, t.members[i+1].p)
+                t.members[i+1].team = this
+                
+                t.members[i+1] = 0
+            endloop
+            t.numMembers = 0
+            t.destroy()
+
+            return true
+        endmethod
+        public static method create takes Defender d returns Team
+            Team t = Team.allocate()
+
+            //add defender
+            t.numMembers = 1
+            t.members[1] = d
+            ForceAddPlayer(t.memberForce, d.p)
+            d.team = t
+            if d.state == DEFENDER_STATE_MISSING then
+                t.state = TEAM_STATE_DEAD
+            else
+                t.state = TEAM_STATE_DONE_ROUND
+            endif
+            
+            //create timer
+            t.roundTimer = CreateTimer()
+            t.roundTimerDialog = CreateTimerDialog(t.roundTimer)
+            TimerDialogSetTitle(t.roundTimerDialog, "Next Round")
+            t.roundStates[0] = ROUND_STATE_COMPLETED
+
+            //place in array
+            Team.numAllocated = Team.numAllocated + 1
+            Team.teams[Team.numAllocated] = t
+            t.arrayIndex = Team.numAllocated
+            return t
+        endmethod
+        private method onDestroy takes nothing returns nothing
+            Team.teams[.arrayIndex] = Team.teams[Team.numAllocated]
+            Team.teams[Team.numAllocated].arrayIndex = .arrayIndex
+            Team.teams[Team.numAllocated] = 0
+            .arrayIndex = 0
+            Team.numAllocated = Team.numAllocated - 1
+
+            DestroyTimer(.roundTimer)
+            DestroyTimerDialog(.roundTimerDialog)
+            .roundTimer = null
+            .roundTimerDialog = null
+        endmethod
+    endstruct
+
+    private function catchEmptiedRound takes nothing returns nothing
+        Round rnd = Round.map[integer(SpawnLib_TriggeringSpawnSet)]
+        if rnd == 0 then; return; endif
+        rnd.t.completeRound(rnd.r)
+        rnd.destroy()
+        Game.checkForEnd()
+    endfunction
+
+    private function initTeam takes nothing returns nothing
+        SpawnLib_AddEmptiedSpawnSetCallBack(function catchEmptiedRound)
+    endfunction
+endlibrary
