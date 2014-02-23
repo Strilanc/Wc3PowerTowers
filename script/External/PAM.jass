@@ -1,0 +1,246 @@
+/////////////////////////////////////////////////////
+/// PAM
+/// Strilanc's Property Attachment Modules
+/// Version: 1.00
+/// Last Updated: April 22, 2009
+/////////////////////////////////////////////////////
+/// Description:
+///  - Provides modules which implement attachment functionality for structs.
+///
+/// Usage:
+///  - Use 'implement PAM_TYPE' at the top of a struct to add attachment functionality to it.
+///  - The return type is the type of the implementing struct. The attached data goes inside the struct.
+///  - Use OnDestroy for manual cleanup required when automatic cleanup occurs for automated and tidy properties.
+///  - Use the static create(K) method for manual initialization required when automatic creation occurs for automated properties.
+///  - Use struct[key] to get the struct instance associated with a key.
+///
+/// Available Types:
+///  - PAM_RawProperty is the simplest type. It takes integers and returns instances of the implementing struct.
+///     - "set struct[K] = S" sets the struct instance associated with K to S
+///     - "struct[K]" returns the struct instance associated with K.
+///     - struct.RemoveKey[K] clears the struct instance associated with K.
+///  - PAM_RawAutoProperty is like PAM_RawProperty, except it automates allocation of instances.
+///     - "struct[K]" returns the struct instance associated with K, creating a new one if none exists.
+///     - The struct must have a static create method with the signature S(int K).
+///  - PAM_Property is the same as RawProperty, except it uses handles instead of integers as keys.
+///     - "set struct[K] = S" sets the struct instance associated with K to S
+///     - "struct[K]" returns the struct instance associated with K.
+///     - struct.RemoveKey[K] clears the struct instance associated with K.
+///  - PAM_TidyProperty_[TYPE] uses handles as keys and manages cleanup of decayed keys. Not all handle types are supported.
+///     - "struct.ManagedCreate(K)" returns the struct instance associated with K, creating a new one if none exists.
+///     - "struct[K]" returns the struct instance associated with K.
+///     - The struct must have a static create method with the signature S([Type] K).
+///  - PAM_AutoProperty_[TYPE] is like TidyProperty, except it also automates allocation of instances.
+///     - "struct[K]" returns the struct instance associated with K, creating a new one if none exists..
+///     - The struct must have a static create method with the signature S([Type] K).
+/////////////////////////////////////////////////////
+library PAM
+    globals
+        private constant boolean SHOW_ERROR_MESSAGES = true
+        private constant boolean SHOW_DEBUG_MESSAGES = false
+
+        private constant integer TABLE_CAPACITY = 6000 //max keys in a hash table
+        private constant integer TABLE_SIZE = 8191 //hash output range
+        private constant integer PROBE_JUPAM = 29 //the number of slots probing skips backwards over
+        
+        private constant integer STATE_USED = 1
+        private constant integer STATE_EPAMTY = 0
+        private constant integer STATE_GHOST = -1
+    endglobals
+
+    ///An int->int hash table with values restricted to [0, 8191)
+    private module Indexer
+        private static integer array states
+        private static integer array keys
+        private static integer num_keys = 0
+        
+        ///Returns (with optional creation on failure) the index associated with the given key, or -1 if no such index.
+        public static method PAM_IndexGet takes integer key, boolean create returns integer
+            local integer e
+            local integer h = key - (key/TABLE_SIZE)*TABLE_SIZE
+            
+            //try opportunistic match
+            if thistype.keys[h] == key and thistype.states[h] == STATE_USED then
+                return h
+            endif
+            
+            //Find slot
+            set e = -1
+            loop
+                //keep in range
+                if h < 0 then
+                    set h = h + TABLE_SIZE
+                endif
+
+                //return match if found
+                if thistype.keys[h] == key and thistype.states[h] == STATE_USED then
+                    return h
+                endif
+
+                //remember the first open slot
+                if e == -1 and thistype.states[h] != STATE_USED then
+                    set e = h
+                endif
+
+                //exit when the probe chain ends
+                exitwhen thistype.states[h] == STATE_EPAMTY
+                
+                //next probe slot
+                set h = h - PROBE_JUPAM
+            endloop
+            
+            //Slot not found; give up if not creating
+            if not create then
+                return -1
+            endif
+            
+            //Fail if at capacity
+            if thistype.num_keys >= TABLE_CAPACITY then
+                if SHOW_ERROR_MESSAGES then
+                    call BJDebugMsg("TI: Couldn't index key[" + I2S(key) + "] due to maximum capacity.")
+                endif
+                return -1
+            endif
+            
+            //Create a new index for the key
+            set thistype.keys[e] = key
+            set thistype.states[e] = STATE_USED
+            set thistype.num_keys = thistype.num_keys + 1
+            debug if SHOW_DEBUG_MESSAGES then
+            debug     call BJDebugMsg("TI: Added key[" + I2S(key) + "] => " + I2S(e) + " [total:" + I2S(thistype.num_keys) + "]")
+            debug endif
+            return e
+        endmethod
+        
+        ///Returns and destroys the index associated with the given key, or -1 if no such index.
+        public static method PAM_IndexDestroy takes integer key returns integer
+            local integer i = thistype.PAM_IndexGet(key, false)
+            local integer r = i
+            if i < 0 then
+                return -1
+            endif
+
+            //Clean the index
+            set thistype.states[i] = STATE_GHOST
+            set thistype.num_keys = thistype.num_keys - 1
+            debug if SHOW_DEBUG_MESSAGES then
+            debug     call BJDebugMsg("TI: Removed key[" + I2S(key) + "] => " + I2S(i) + " [total:" + I2S(thistype.num_keys) + "]")
+            debug endif
+                
+            //Check if the following slot is in a probe tail
+            set i = i - PROBE_JUPAM
+            if i < 0 then
+                set i = i + TABLE_SIZE
+            endif
+            if thistype.states[i] != STATE_EPAMTY then
+                return r
+            endif
+            
+            //We're at the end of a probe tail; cut the tail
+            loop
+                set i = i + PROBE_JUPAM
+                if i >= TABLE_SIZE then
+                    set i = i - TABLE_SIZE
+                endif
+                
+                exitwhen thistype.states[i] != STATE_GHOST
+                set thistype.states[i] = STATE_EPAMTY
+            endloop
+            
+            return r
+        endmethod
+    endmodule
+    
+    ///A handle->int hash table with values restricted to [0, 8191)
+    private module HandleIndexer
+        implement Indexer
+        static method PAM_HIndexGet takes handle key, boolean create returns integer
+            return thistype.PAM_IndexGet(GetHandleId(key), create)
+        endmethod
+        static method PAM_HIndexDestroy takes handle key returns integer
+            return thistype.PAM_IndexDestroy(GetHandleId(key))
+        endmethod
+    endmodule
+
+    ///Keeps a list of instances of a struct.
+    private module InstanceList
+        static thistype array PAM_list
+        static integer PAM_num = 0
+        public integer PAM_list_index
+        ///Ensures the instance is in the list.
+        method PAM_ListAdd takes nothing returns nothing
+            if this != 0 and thistype.PAM_list[.PAM_list_index] != this then
+                set thistype.PAM_list[thistype.PAM_num] = this
+                set .PAM_list_index = thistype.PAM_num
+                set thistype.PAM_num = thistype.PAM_num + 1
+            endif
+        endmethod
+        ///Ensures the instance is removed from the list.
+        method PAM_ListRemove takes nothing returns nothing
+            if this != 0 and thistype.PAM_list[.PAM_list_index] == this then
+                set thistype.PAM_num = thistype.PAM_num - 1
+                set thistype.PAM_list[.PAM_list_index] = thistype.PAM_list[thistype.PAM_num]
+                set thistype.PAM_list[.PAM_list_index].PAM_list_index = .PAM_list_index
+                set thistype.PAM_list[thistype.PAM_num] = -1
+                set .PAM_list_index = -1
+            endif
+        endmethod
+    endmodule
+
+    ///An unmanaged integer property.
+    public module RawProperty
+        implement Indexer
+        private static thistype array map
+        
+        ///Clears a key's value.
+        public static method RemoveKey takes integer key returns nothing
+            call thistype.PAM_IndexDestroy(key)
+        endmethod
+        ///Gets a key's value.
+        public static method operator[]= takes integer key, thistype val returns nothing
+            set thistype.map[thistype.PAM_IndexGet(key, true)] = val
+        endmethod
+        ///Sets a key's value.
+        public static method operator[] takes integer key returns thistype
+            return thistype.map[thistype.PAM_IndexGet(key, false)]
+        endmethod
+    endmodule
+    
+    ///An integer property which is automatically allocated.
+    public module RawAutoProperty
+        implement Indexer
+        private static thistype array map
+        
+        ///Creates an associated instance for the given key, or returns the previously associated instance.
+        ///Delegates instanciation to thistype.create(key). If thistype.create(key) returns 0, no association is created.
+        public static method operator[] takes integer key returns thistype
+            local thistype this = thistype.map[thistype.PAM_IndexGet(key, false)]
+            if this == 0 then
+                set this = thistype.create(key)
+                if this != 0 then
+                    set thistype.map[thistype.PAM_IndexGet(key, true)] = this
+                endif
+            endif
+            return this
+        endmethod
+    endmodule
+
+    ///An unmanaged handle property.
+    public module Property
+        implement HandleIndexer
+        private static thistype array map
+        
+        ///Clears a key's value.
+        public static method RemoveKey takes handle key returns nothing
+            call thistype.PAM_HIndexDestroy(key)
+        endmethod
+        ///Gets a key's value.
+        public static method operator[]= takes handle key, thistype val returns nothing
+            set thistype.map[thistype.PAM_HIndexGet(key, true)] = val
+        endmethod
+        ///Sets a key's value.
+        public static method operator[] takes handle key returns thistype
+            return thistype.map[thistype.PAM_HIndexGet(key, false)]
+        endmethod
+    endmodule
+endlibrary
