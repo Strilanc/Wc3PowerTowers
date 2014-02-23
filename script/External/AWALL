@@ -1,0 +1,229 @@
+///////////////////////////////////////////////////////
+/// Strilanc's Anti Wall Library
+/// Last Updated: April 27, 2009
+/// Version: 1.01
+///////////////////////////////////////////////////////
+/// Description:
+///  Detects when player's try to abuse unit pathing in tower defense maps.
+///  Checks ensure runners are not stopped, stuck, attacking, or backtracking.
+///
+/// Usage:
+///  - Create a callback function which takes unit walled_unit, integer reason_id, string reason_desc and returns nothing.
+///  - Add towers using AWALL_AddTower(new_tower). The system needs to know the towers to catch runners attacking them.
+///  - Add new runners using AWALL_Runner.create(new_runner, UnitWalledCallback.your_callback)
+///  - When runners reach waypoints, use AWALL_Runner[moving_runner].ClearTrail(), or backtracking might be falsely detected.
+///  - Remove runners using AWALL_Runner[old_runner].destroy()
+///  - When your callback is called, check the reason_id to distinguish the various cases.
+///  - If the reason_id is AWALL_REASON_PREVENT, do not punish the player, just re-order the runner.
+///  - The reason id constants are listed at the top of the library.
+///////////////////////////////////////////////////////
+library AWALL initializer init requires PAM, GEV
+    globals
+        public constant integer REASON_PREVENT = 0 //the unit is acting odd and should be re-ordered
+        public constant integer REASON_BACKTRACKING = 1 //the unit backtracked
+        public constant integer REASON_STOPPED = 2 //the unit is stopped
+        public constant integer REASON_ATTACKING = 3 //the unit is attacking
+        public constant integer REASON_STUCK = 4 //the unit hasn't moved far for awhile
+    endglobals
+    public function interface UnitWalledCallback takes unit walled_unit, integer reason_id, string reason_desc returns nothing
+
+    ///////////////////////////////////////////////////////////////
+    
+    globals
+        private string array reason_descs
+
+        private constant real TICK_PERIOD = 1.0 //seconds between dropping crumbs
+        private constant integer MAX_STUCK_COUNT = 8 //number of ticks a unit must not travel to be considered stuck
+        private constant integer HOLD_COUNT = 2 //number of ticks after a stun a unit won't be counted as walled
+        private constant integer MIN_DISTANCE = 256 //min distance a unit must travel to be considered moving
+        private rect world_bounds
+    endglobals
+        
+    public struct Runner
+        implement PAM_Property
+        
+        //list
+        private static thistype array list
+        private static integer num = 0
+        private integer index
+        
+        private unit runner
+        private UnitWalledCallback callback
+        private trigger trig_enter = CreateTrigger()
+        private region trail = CreateRegion()
+        private real x1
+        private real x2
+        private real y1
+        private real y2
+        private integer stuck = 0
+                
+        //////////////////////////////////////////////////////////
+        /// Runner Behavior Methods
+        //////////////////////////////////////////////////////////
+
+        ///Extends the runner's trail and updates its position cell to trigger the leave event again
+        private method UpdatePos takes nothing returns nothing
+            call RegionClearCell(.trail, .x2, .y2)
+            call RegionAddCell(.trail, .x1, .y1)
+            set .x2 = .x1
+            set .y2 = .y1
+            set .x1 = GetUnitX(.runner)
+            set .y1 = GetUnitY(.runner)        
+            if .stuck >= 0 then
+                set .stuck = 0
+            endif
+        endmethod
+
+        ///Clears the runner's trail. Should be called when the runner reaches waypoints.
+        public method ClearTrail takes nothing returns nothing
+            call .UpdatePos()
+            call .UpdatePos()
+        endmethod
+
+        ///Tells the outside that the runner appears to be walled
+        private method raise takes integer reason_id returns nothing
+            if .stuck < 0 then
+                call .callback.evaluate(.runner, REASON_PREVENT, reason_descs[REASON_PREVENT])
+            else
+                call .ClearTrail()
+                call .callback.evaluate(.runner, reason_id, reason_descs[reason_id])
+            endif
+        endmethod
+        
+        ///Returns true if the runner is currently unable to move for legitimate reasons
+        private method IsCurrentlyStuck takes nothing returns boolean
+            if IsUnitType(.runner, UNIT_TYPE_STUNNED) then
+                return true
+            elseif IsUnitType(.runner, UNIT_TYPE_SNARED) then
+                return true
+            elseif IsUnitPaused(.runner) then
+                return true
+            elseif GetUnitState(.runner, UNIT_STATE_LIFE) <= 0 then
+                return true
+            else
+                return false
+            endif
+        endmethod
+        
+        ///Periodic check of the runner's status
+        private method tick takes nothing returns nothing
+            if .IsCurrentlyStuck() then
+                set .stuck = -HOLD_COUNT
+            endif
+        
+            if GetUnitCurrentOrder(.runner) == 0 then
+                call .raise(REASON_STOPPED)
+            elseif GetUnitCurrentOrder(.runner) == OrderId("attack") then
+                call .raise(REASON_ATTACKING)
+            elseif RAbsBJ(GetUnitX(.runner) - .x1) + RAbsBJ(GetUnitY(.runner) - .y1) > MIN_DISTANCE then
+                call .UpdatePos()
+            else
+                set .stuck = .stuck + 1
+                if .stuck >= MAX_STUCK_COUNT then
+                    //unit hasn't moved far for awhile, it is stuck
+                    call .raise(REASON_STUCK)
+                endif
+            endif
+        endmethod
+        
+        //////////////////////////////////////////////////////////
+        /// Event Callbacks
+        //////////////////////////////////////////////////////////
+        ///Called periodically
+        private static method catch_tick takes nothing returns nothing
+            local integer i = .num
+            loop
+                set i = i - 1
+                exitwhen i < 0
+                call thistype.list[i].tick()
+            endloop
+        endmethod
+        ///Called when a tower attacks any unit
+        public static method catch_tower_attacked takes nothing returns nothing
+            local Runner this = Runner[GetAttacker()]
+            if this != 0 then
+                call .raise(REASON_ATTACKING)
+            endif
+        endmethod
+        ///Called when a runner moves out of its position cell
+        private static method catch_move takes nothing returns nothing
+            local Runner this = Runner[GetTriggerUnit()]
+            if GetTriggeringRegion() == .trail then
+                call .raise(REASON_BACKTRACKING)
+            endif
+        endmethod
+
+        //////////////////////////////////////////////////////////
+        /// PAM Callbacks
+        //////////////////////////////////////////////////////////
+        private method onDestroy takes nothing returns nothing
+            call Runner.RemoveKey(.runner)
+            
+            //position and trail
+            call RemoveRegion(.trail)
+            call DestroyTrigger(.trig_enter)
+            set .trig_enter = null
+            set .trail = null
+            set .runner = null
+            
+            //list
+            set thistype.num = thistype.num - 1
+            set thistype.list[.index] = thistype.list[thistype.num]
+            set thistype.list[.index].index = .index
+        endmethod
+                
+        //////////////////////////////////////////////////////////
+        /// Initialization
+        //////////////////////////////////////////////////////////
+        private static boolean initialized = false
+        public static method init_struct takes nothing returns nothing
+            local trigger t
+            if not thistype.initialized then
+                set thistype.initialized = true
+            
+                set t = CreateTrigger()
+                call TriggerRegisterTimerEvent(t, TICK_PERIOD, true)
+                call TriggerAddAction(t, function Runner.catch_tick)
+            endif
+        endmethod
+    
+        ///Adds a runner to the system.
+        public static method create takes unit runner, UnitWalledCallback callback returns Runner
+            local Runner this = Runner.allocate()
+            set Runner[runner] = this            
+            set .runner = runner
+            set .callback = callback
+
+            //trail
+            call TriggerAddAction(.trig_enter, function Runner.catch_move)
+            call TriggerRegisterEnterRegion(.trig_enter, .trail, null)
+            call .ClearTrail()
+
+            //list
+            set thistype.list[thistype.num] = this
+            set .index = thistype.num
+            set thistype.num = thistype.num + 1
+
+            return this
+        endmethod
+    endstruct
+
+    //! runtextmacro CreateGroupEvent("TowerAttacked", "EVENT_UNIT_ATTACKED", "function Runner.catch_tower_attacked")
+
+    ///Adds a unit which will throw attacked events
+    public function AddTower takes unit u returns nothing
+        call TowerAttackedAddUnit(u)
+    endfunction
+    
+    private function init takes nothing returns nothing
+        set world_bounds = GetWorldBounds()
+
+        set reason_descs[REASON_PREVENT] = "Prevent"
+        set reason_descs[REASON_BACKTRACKING] = "Backtracking"
+        set reason_descs[REASON_STOPPED] = "Stopped"
+        set reason_descs[REASON_ATTACKING] = "Attacking"
+        set reason_descs[REASON_STUCK] = "Stuck"
+
+        call Runner.init_struct()
+    endfunction
+endlibrary
