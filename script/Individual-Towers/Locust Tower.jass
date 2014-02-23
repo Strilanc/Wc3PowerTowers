@@ -1,0 +1,7 @@
+library UnitLocustTower initializer init requires DataCreation
+    private ShortList uids
+    private function init takes nothing returns nothing
+        uids = ShortList.create6('h043', 'h04D', 'h04E', 'h04F', 'h04G', 'h04H')
+        CreateCombatSetData(uids, AttackCastType_Instant, 'A00L', OrderId("locustswarm"))
+    endfunction
+endlibrary
