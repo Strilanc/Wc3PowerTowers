@@ -1,0 +1,345 @@
+///Handles the multiboard
+library LibMultiboard requires SpawnLib
+    globals
+        private constant integer NUM_COLUMNS = 4
+        private constant integer ROW_HEADER = 0
+        private constant integer ROW_COLUMN_TITLES = 1
+        private constant integer ROW_PLAYERS = 2
+        
+        private constant integer COL_NAME = 0
+        private constant integer COL_AVAIL = 1
+        private constant integer COL_PRODUC = 2
+        private constant integer COL_DRAIN = 3
+        
+        private constant integer COL_ROUND = 0
+        private constant integer COL_RUNNERS = 1
+        private constant integer COL_TIME = 2
+        private constant integer COL_EMPTY = 3
+        
+        private multiboarditem lastItem = null
+        private multiboard board = null
+        private integer array rowMap
+        private integer mode = 0
+        
+        integer array lastProducD
+        integer array lastDrainD
+        integer array lastAvailD
+    endglobals
+
+    ///Returns the multiboarditem for the given position and takes care of cleaning
+    private function cell takes integer row, integer col returns multiboarditem
+        call MultiboardReleaseItem(lastItem)
+        set lastItem = MultiboardGetItem(board, row, col)
+        return lastItem
+    endfunction
+    
+    ///Updates the board to current values
+    private function UpdateMultiboardIntro takes nothing returns nothing
+        local integer i = 0
+        local string s
+        
+        call MultiboardSetItemValue(cell(i, 0), "Teams")
+        set s = ""
+        if Game.team_type == -1 or Game.team_type == TEAM_TYPE_SOLO then
+            set s = "Solo"
+        elseif Game.team_type == TEAM_TYPE_CORNERS then
+            set s = "Corners"
+        elseif Game.team_type == TEAM_TYPE_SIDES then
+            set s = "Sides"
+        elseif Game.team_type == TEAM_TYPE_COOP then
+            set s = "Coop"
+        endif
+        call MultiboardSetItemValue(cell(i, 1), s)
+        set i = i + 1
+        call MultiboardSetItemValue(cell(i, 1), "|cFF808080-solo, -corner, -side, -coop|r")
+        set i = i + 1
+        
+        call MultiboardSetItemValue(cell(i, 0), "Rounds")
+        set s = I2S(Game.numRounds)
+        if Game.numRounds == GAME_LENGTH_ENDLESS then
+            set s = "Endless"
+        elseif Game.numRounds == GAME_LENGTH_LAST_MAN then
+            set s = "Last Man"
+        endif
+        call MultiboardSetItemValue(cell(i, 1), s)
+        set i = i + 1
+        call MultiboardSetItemValue(cell(i, 1), "|cFF808080-rounds=#, -lastman, -endless|r")
+        set i = i + 1
+        
+        call MultiboardSetItemValue(cell(i, 0), "Income")
+        if Game.fair_income then
+            set s = "fair"
+        else
+            set s = "killer"
+        endif
+        if Game.inherit_income then
+            set s = s + ", inherit"
+        endif
+        call MultiboardSetItemValue(cell(i, 1), s)
+        set i = i + 1
+        call MultiboardSetItemValue(cell(i, 1), "|cFF808080-fair, -killer, -inherit|r")
+        set i = i + 1
+        
+        call MultiboardSetItemValue(cell(i, 0), "Difficulty")
+        set s = ""
+        if Game.difficulty == DIFFICULTY_NOOB then
+            set s = "Noob"
+        elseif Game.difficulty == DIFFICULTY_ROOKIE then
+            set s = "Rookie"
+        elseif Game.difficulty == DIFFICULTY_HOTSHOT then
+            set s = "Hotshot"
+        elseif Game.difficulty == DIFFICULTY_VETERAN then
+            set s = "Veteran"
+        elseif Game.difficulty == DIFFICULTY_ELITE then
+            set s = "Elite"
+        elseif Game.difficulty == DIFFICULTY_PSYCHO then
+            set s = "Psycho"
+        endif
+        call MultiboardSetItemValue(cell(i, 1), s)
+        set i = i + 1
+        call MultiboardSetItemValue(cell(i, 1), "|cFF808080-noob, -rookie, -hotshot, -veteran, -elite, -psycho|r")
+        set i = i + 1
+        
+        call MultiboardSetItemValue(cell(i, 0), "Mode")
+        set s = ""
+        if not Game.syncedRounds then
+            set s = s + "Race "
+        endif
+        if Game.rushedRounds then
+            set s = s + "Rush "
+        endif
+        if Game.warMode then
+            set s = s + "War "
+        endif
+        if s == "" then
+            set s = "Normal"
+        endif
+        call MultiboardSetItemValue(cell(i, 1), s)
+        set i = i + 1
+        call MultiboardSetItemValue(cell(i, 1), "|cFF808080-race, -rush, -war|r")
+        set i = i + 1
+        call MultiboardSetItemValue(cell(i, 1), "|cFF808080-lives=#, -suddendeath, -tech|r")
+        set i = i + 1
+    endfunction
+    private function UpdateMultiboardGame takes nothing returns nothing
+        local integer i
+        local integer n
+        local integer m
+        local Tower t
+        local Defender d
+        local integer array produc
+        local integer array drain
+        local integer array avail
+
+        //calculate stats
+        loopForIntBelow(i, Tower.num)
+            t = Tower.list[i]
+            set d = Defender.fromUnit(t.u)
+            if d != 0 then
+                set n = d.index
+                set produc[n] += IMaxBJ(-t.data.usageEstimate, 0)
+                set drain[n] += IMaxBJ(t.data.usageEstimate, 0)
+                set avail[n] += t.GetEnergy()
+            endif
+        endloop
+
+        //Header
+        set n = Game.getMinRound()
+        set m = Game.getMaxRound()
+        if m < n then
+            call MultiboardSetItemValue(cell(ROW_HEADER, COL_ROUND), "Round: |cFFFFCC00-|r")
+        elseif m > n then
+            call MultiboardSetItemValue(cell(ROW_HEADER, COL_ROUND), "Round: |cFFFFCC00" + I2S(n) + ":" + I2S(m) + "|r")
+        else
+            call MultiboardSetItemValue(cell(ROW_HEADER, COL_ROUND), "Round: |cFFFFCC00" + I2S(n) + "|r")
+        endif
+        call MultiboardSetItemValue(cell(ROW_HEADER, COL_RUNNERS), "Runners: |cFFFFCC00" + I2S(SpawnLib_NumRemaining()) + "|r")
+        call MultiboardSetItemValue(cell(ROW_HEADER, COL_TIME), "|cFFC3DBFF" + Game.getFormattedTime() + "|r")
+
+        //Players
+        set i = 1
+        loop
+            exitwhen i > NUM_DEFENDERS
+            set d = defenders[i]
+            set n = rowMap[i]
+            if n != 0 then
+                set lastAvailD[i] = avail[i]
+                set lastProducD[i] = produc[i]
+                set lastDrainD[i] = drain[i]
+                if d.state == DEFENDER_STATE_DEFENDING then
+                    call MultiboardSetItemValue(cell(n, COL_AVAIL), cSmallStr(avail[i]))
+                    call MultiboardSetItemValue(cell(n, COL_PRODUC), cSmallStr(produc[i]))
+                    call MultiboardSetItemValue(cell(n, COL_DRAIN), cSmallStr(drain[i]))
+                else
+                    call MultiboardSetItemValue(cell(n, COL_AVAIL), "-")
+                    call MultiboardSetItemValue(cell(n, COL_PRODUC), "-")
+                    call MultiboardSetItemValue(cell(n, COL_DRAIN), "-")
+                endif
+            endif
+            set i = i + 1
+        endloop
+    endfunction
+    function UpdateMultiboard takes nothing returns nothing
+        if mode == 1 then
+            call UpdateMultiboardIntro()
+        elseif mode == 2 then
+            call UpdateMultiboardGame()
+        endif
+    endfunction
+
+    ///Assigns players to rows in the multiboard
+    function AssignMultiboardPlayerRows takes nothing returns nothing
+        local integer i
+        local integer j
+        local integer n
+        local integer row
+        local Defender d
+        if mode != 2 then
+            return
+        endif
+
+        //assign rows in order
+        set i = 1
+        set row = ROW_PLAYERS
+        loop
+            exitwhen i > NUM_DEFENDERS
+            set d = defenders[i]
+            if d.state != DEFENDER_STATE_MISSING then
+                call MultiboardSetItemValue(cell(row, COL_NAME), d.getNameWithColor())
+                set rowMap[i] = row
+                set row = row + 1
+            else
+                set rowMap[i] = 0
+            endif
+            set i = i + 1
+        endloop
+
+        //resize board
+        call MultiboardSetRowCount(board, row)
+        call UpdateMultiboard()
+        call MultiboardDisplay(board, true)
+    endfunction
+
+    function StartMultiboard1 takes nothing returns nothing
+        local integer i
+        local integer n
+
+        //Create
+        set mode = 1
+        call DestroyMultiboard(board)
+        set board = CreateMultiboard()
+        call MultiboardSetRowCount(board, 11)
+        call MultiboardSetColumnCount(board, 2)
+        call MultiboardSetTitleText(board, "Power Towers")
+        
+        //Styles
+        set i = 0
+        set n = MultiboardGetRowCount(board)
+        loop
+            exitwhen i >= n
+            call MultiboardSetItemStyle(cell(i, 0), true, false)
+            call MultiboardSetItemStyle(cell(i, 1), true, false)
+            call MultiboardSetItemWidth(cell(i, 0), 0.04)
+            call MultiboardSetItemWidth(cell(i, 1), 0.25)
+            call MultiboardSetItemValueColor(cell(i, 0), 192, 205, 255, 255)
+            set i = i + 1
+        endloop
+        call MultiboardDisplay(board, true)
+    endfunction
+    function StartMultiboard2 takes nothing returns nothing
+        local integer i
+        local integer n
+        local string caption = ""
+        if not Game.syncedRounds then
+            set caption = caption + "/Race"
+        endif
+        if Game.rushedRounds then
+            set caption = caption + "/Rush"
+        endif
+        if Game.warMode then
+            set caption = caption + "/War"
+        endif
+        if caption == "" then
+            set caption = "/Normal"
+        endif
+        if Game.difficulty == DIFFICULTY_NOOB then
+            set caption = "Noob" + caption
+        elseif Game.difficulty == DIFFICULTY_ROOKIE then
+            set caption = "Rookie" + caption
+        elseif Game.difficulty == DIFFICULTY_HOTSHOT then
+            set caption = "Hotshot" + caption
+        elseif Game.difficulty == DIFFICULTY_VETERAN then
+            set caption = "Veteran" + caption
+        elseif Game.difficulty == DIFFICULTY_ELITE then
+            set caption = "Elite" + caption
+        elseif Game.difficulty == DIFFICULTY_PSYCHO then
+            set caption = "Psycho" + caption
+        endif
+        if Game.numRounds == GAME_LENGTH_ENDLESS then
+            set caption = caption + "/Endless"
+        elseif Game.numRounds == GAME_LENGTH_LAST_MAN then
+            set caption = caption + "/Last Man"
+        else
+            set caption = caption + "/" + I2S(Game.numRounds) + " Rounds"
+        endif
+        if Game.team_type == -1 or Game.team_type == TEAM_TYPE_SOLO then
+            set caption = "Solo/" + caption
+        elseif Game.team_type == TEAM_TYPE_CORNERS then
+            set caption = "Corners/" + caption
+        elseif Game.team_type == TEAM_TYPE_SIDES then
+            set caption = "Sides/" + caption
+        elseif Game.team_type == TEAM_TYPE_COOP then
+            set caption = "Coop/" + caption
+        endif
+
+        //Create
+        set mode = 2
+        call DestroyMultiboard(board)
+        set board = CreateMultiboard()
+        call MultiboardSetRowCount(board, ROW_PLAYERS+NUM_DEFENDERS)
+        call MultiboardSetColumnCount(board, NUM_COLUMNS)
+        call MultiboardSetTitleText(board, caption)
+        call AssignMultiboardPlayerRows()
+        
+        //Styles
+        set i = 0
+        set n = MultiboardGetRowCount(board)
+        loop
+            exitwhen i >= n
+            call MultiboardSetItemStyle(cell(i, 0), true, false)
+            call MultiboardSetItemStyle(cell(i, 1), true, false)
+            call MultiboardSetItemStyle(cell(i, 2), true, false)
+            call MultiboardSetItemStyle(cell(i, 3), true, false)
+            set i = i + 1
+        endloop
+        
+        //Widths
+        call MultiboardSetItemWidth(cell(ROW_HEADER, COL_ROUND), 0.07)
+        call MultiboardSetItemWidth(cell(ROW_HEADER, COL_RUNNERS), 0.07)
+        call MultiboardSetItemWidth(cell(ROW_HEADER, COL_TIME), 0.06)
+        call MultiboardSetItemWidth(cell(ROW_HEADER, COL_EMPTY), 0.00)
+        set i = ROW_COLUMN_TITLES
+        set n = MultiboardGetRowCount(board)
+        loop
+            exitwhen i >= n
+            call MultiboardSetItemWidth(cell(i, COL_NAME), 0.08)
+            call MultiboardSetItemWidth(cell(i, COL_AVAIL), 0.04)
+            call MultiboardSetItemWidth(cell(i, COL_PRODUC), 0.04)
+            call MultiboardSetItemWidth(cell(i, COL_DRAIN), 0.04)
+            set i = i + 1
+        endloop
+        
+        //Columns
+        call MultiboardSetItemValue(cell(ROW_COLUMN_TITLES, COL_NAME), "Players")
+        call MultiboardSetItemValue(cell(ROW_COLUMN_TITLES, COL_AVAIL), "Avail")
+        call MultiboardSetItemValue(cell(ROW_COLUMN_TITLES, COL_PRODUC), "Produc")
+        call MultiboardSetItemValue(cell(ROW_COLUMN_TITLES, COL_DRAIN), "Drain")
+        call MultiboardSetItemValueColor(cell(ROW_COLUMN_TITLES, COL_NAME), 192, 205, 255, 255)
+        call MultiboardSetItemValueColor(cell(ROW_COLUMN_TITLES, COL_AVAIL), 192, 205, 255, 255)
+        call MultiboardSetItemValueColor(cell(ROW_COLUMN_TITLES, COL_PRODUC), 192, 205, 255, 255)
+        call MultiboardSetItemValueColor(cell(ROW_COLUMN_TITLES, COL_DRAIN), 192, 205, 255, 255)
+        
+        //Prepared
+        call MultiboardDisplay(board, true)
+    endfunction
+endlibrary
