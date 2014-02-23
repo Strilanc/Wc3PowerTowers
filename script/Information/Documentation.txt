@@ -1,0 +1,24 @@
+You may have noticed this map is not locked. That is on purpose.
+All I ask that you do, if you edit the map, is change the filename and the description to avoid confusing people and warcraft 3.
+Keep in mind that modifications are detected in order to warn people about potential map rigging.
+If you can remove the modification detection, good for you! :D
+
+- Strilanc
+craig.gidney@gmail.com
+
+= Requirements ======================================================
+- NewGen
+http://www.wc3c.net/showthread.php?t=90999
+- cJass
+http://cjass.xgm.ru/
+
+= Notes ========================================
+- All the things the secondary builder can build need to be in the construction list of the primary builder.
+- Point Value: Transfer Power (used by engine)
+- Armor: Transfer power (shown in interface)
+- Food Produced: Total Gold Value of the Tower
+- Heavy Armor: Generator Power UI
+- Medium Armor: Transfer Power UI
+
+- Fortified Armor: No Power UI
+- Unarmored: Runner UI
