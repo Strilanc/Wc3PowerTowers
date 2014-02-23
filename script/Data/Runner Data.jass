@@ -1,0 +1,147 @@
+///Contains a lot of the constants used by the engine
+///Includes various runner properties
+///Includes the "isX" functions for towers
+library RunnerData initializer init requires Constants
+    private integer array runnerTypes
+    private integer numRunnerTypes = -1 //first added runner will be 'max'
+
+    //////////
+    function getRoundRunnerUnitType takes integer n returns integer
+        if n <= 0 or n > MAX_ROUND then
+            return runnerTypes[0]
+        else
+            return runnerTypes[n]
+        endif
+    endfunction
+
+    //////////
+    function getRoundRunnerHealth takes integer rnd, integer dif returns integer
+        real hp
+        if rnd <= 0 then; return 10; endif
+
+        if dif == DIFFICULTY_NOOB then
+            hp = polynom3(rnd, 25, 10, 15, 0)
+
+        elseif dif == DIFFICULTY_ROOKIE then
+            hp = polynom3(rnd, 15, 0, 35, 0)
+
+        elseif dif == DIFFICULTY_HOTSHOT then
+            hp = polynom3(rnd, 50, 21, 28, 1)
+
+        elseif dif == DIFFICULTY_VETERAN then
+            hp = polynom3(rnd, 50, 20, 28, 2)
+
+        elseif dif == DIFFICULTY_ELITE then
+            hp = polynom3(rnd, 40, 80, 0, 6)
+
+        elseif dif == DIFFICULTY_PSYCHO then
+            hp = polynom3(rnd, 64, 128, 0, 10)
+        
+        else
+            BJDebugMsg("Map Error: Unrecognized difficulty. (getRoundRunnerHealth)")
+            assert(false)
+        endif
+
+        //increase exponentially after the last round
+        if rnd > MAX_ROUND then; hp *= Pow(1.1, rnd-MAX_ROUND); endif
+
+        //make hp a multiple of 25
+        hp = floor(hp/25.)*25
+        if hp < 25 then; hp = 25; endif
+        
+        return R2I(hp)
+    endfunction
+
+    //////////
+    function getRoundRunnerBounty takes integer n returns integer
+        return ceiling(n/4.) //1,1,1,1, 2,2,2,2, 3,3,3,3, ...
+    endfunction
+
+    //////////
+    function getRoundFinishBounty takes integer n returns integer
+        return getRoundRunnerBounty(n) * 10
+    endfunction
+
+    //////////
+    function getRoundAccumulatedBounty takes integer n returns integer
+        integer i
+        integer t = 0
+        loopForIntBelow(i, n-1)
+            t = t + getRoundRunnerBounty(i+1)*SPAWNS_PER_ROUND + getRoundFinishBounty(i+1)
+        endloop
+        return t+STARTING_GOLD
+    endfunction
+
+    //////////
+    function isSpecialRound takes integer n returns boolean
+        return ModuloInteger(n, 5) == 0
+    endfunction
+
+    //////////
+    function isSpeedRound takes integer n returns boolean
+        return isSpecialRound(n) and (n > MAX_ROUND or n == 5 or n == 15 or n == 25 or n == 30)
+    endfunction
+
+    //////////
+    function isFeedbackRound takes integer n returns boolean
+        return isSpecialRound(n) and (n > MAX_ROUND or n == 10 or n == 15 or n == 30)
+    endfunction
+
+    //////////
+    function isShieldRound takes integer n returns boolean
+        return isSpecialRound(n) and (n > MAX_ROUND or n == 20 or n == 25 or n == 30)
+    endfunction
+
+    private function AddRunnerType takes integer unitId returns nothing
+        //preload
+        RemoveUnit(CreateUnit(Player(15), unitId, 0, 0, 0))
+        
+        set numRunnerTypes = numRunnerTypes + 1
+        set runnerTypes[numRunnerTypes] = unitId
+    endfunction
+    
+    private function init takes nothing returns nothing
+        //Max (after last round)
+        AddRunnerType('h041')
+        //1-5
+        AddRunnerType('h00C')
+        AddRunnerType('h01Y')
+        AddRunnerType('h01Z')
+        AddRunnerType('h020')
+        AddRunnerType('h021')
+        //6-10        
+        AddRunnerType('h022')
+        AddRunnerType('h023')
+        AddRunnerType('h024')
+        AddRunnerType('h025')
+        AddRunnerType('h026')
+        //11-15
+        AddRunnerType('h027')
+        AddRunnerType('h028')
+        AddRunnerType('h029')
+        AddRunnerType('h02A')
+        AddRunnerType('h02B')
+        //16-20
+        AddRunnerType('h02C')
+        AddRunnerType('h02D')
+        AddRunnerType('h02E')
+        AddRunnerType('h02F')
+        AddRunnerType('h02G')
+        //21-25
+        AddRunnerType('h02H')
+        AddRunnerType('h02I')
+        AddRunnerType('h02J')
+        AddRunnerType('h02K')
+        AddRunnerType('h02L')
+        //26-30
+        AddRunnerType('h02M')
+        AddRunnerType('h02N')
+        AddRunnerType('h02O')
+        AddRunnerType('h02P')
+        AddRunnerType('h02Q')
+        
+        if MAX_ROUND != numRunnerTypes then
+            BJDebugMsg("Map Error: number of runner types doesn't  match MAX_ROUND. (initConstants)")
+        endif
+    endfunction
+endlibrary
