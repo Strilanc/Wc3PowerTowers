@@ -1,0 +1,121 @@
+trigger TEMP_MACRO_TRIG
+integer TEMP_MACRO_INT
+integer MACRO_CRASHER
+
+define
+    assert(condition) = {
+        debug if not (condition) then
+        debug     call BJDebugMsg("Assertion Failure: `condition`")
+        debug     MACRO_CRASHER = MACRO_CRASHER //thread crash
+        debug endif
+    }
+    print(msg) = {
+        DisplayTextToPlayer(GetLocalPlayer(), 0, 0, msg)
+    }
+    tell(receiver, msg) = {
+        DisplayTextToPlayer(receiver, 0, 0, msg)
+    }
+    AddUnitEnterMapEventHandler(ac) = {
+        TEMP_MACRO_TRIG = CreateTrigger()
+        TriggerRegisterEnterRectSimple(TEMP_MACRO_TRIG, GetWorldBounds())
+        TriggerAddAction(TEMP_MACRO_TRIG, ac)
+    }
+    AddPeriodicEventHandler(period, ac) = {
+        TEMP_MACRO_TRIG = CreateTrigger()
+        TriggerRegisterTimerEvent(TEMP_MACRO_TRIG, period, true)
+        TriggerAddAction(TEMP_MACRO_TRIG, ac)
+    }
+    AddTimeoutEventHandler(duration, ac) = {
+        TEMP_MACRO_TRIG = CreateTrigger()
+        TriggerRegisterTimerEvent(TEMP_MACRO_TRIG, duration, false)
+        TriggerAddAction(TEMP_MACRO_TRIG, ac)
+    }
+    AddChatEventHandler(str, exact, ac) = {
+        TEMP_MACRO_TRIG = CreateTrigger()
+        loopForIntBelow(TEMP_MACRO_INT, 12)
+            TriggerRegisterPlayerChatEvent(TEMP_MACRO_TRIG, Player(TEMP_MACRO_INT), str, exact)
+        endloop
+        TriggerAddAction(TEMP_MACRO_TRIG, ac)
+    }
+    AddPlayerEventHandler(ev, ac) = {
+        TEMP_MACRO_TRIG = CreateTrigger()
+        loopForIntBelow(TEMP_MACRO_INT, 12)
+            TriggerRegisterPlayerEvent(TEMP_MACRO_TRIG, Player(TEMP_MACRO_INT), ev)
+        endloop
+        TriggerAddAction(TEMP_MACRO_TRIG, ac)
+    }
+    AddUnitEventHandler(ev, ac) = {
+        TEMP_MACRO_TRIG = CreateTrigger()
+        TriggerRegisterAnyUnitEventBJ(TEMP_MACRO_TRIG, ev)
+        TriggerAddAction(TEMP_MACRO_TRIG, ac)
+    }
+    AddFastUnitEventHandler(ev, ac) = {
+        TEMP_MACRO_TRIG = CreateTrigger()
+        TriggerRegisterAnyUnitEventBJ(TEMP_MACRO_TRIG, ev)
+        TriggerAddCondition(TEMP_MACRO_TRIG, Condition(ac))
+    }
+    macro_NullGuard(x) = {
+        if this == 0 then
+            return x
+        endif
+    }
+    loopWhile(x) = {
+        loop
+            exitwhen not (x)
+    }
+    loopUntil(x) = {
+        loop
+            exitwhen (x)
+    }
+    loopForIntBelow(var, max) = {
+        var = -1
+        loop
+            var++
+            exitwhen var >= (max)
+    }
+    break = exitwhen true
+    loopThroughUnitGroupDestructive(u, g) = {
+        loop
+            u = FirstOfGroup(g)
+            exitwhen u == null
+            GroupRemoveUnit(g, u)
+    }
+    
+    AllocateThis() = {
+        thistype this
+        this = thistype.allocate()
+        if this == 0 then
+            BJDebugMsg("Map Error: Struct allocation failed.")
+            assert(false)
+            return 0
+        endif
+    }
+    constructor(arg1) = {
+        static method create takes arg1 returns thistype
+            AllocateThis
+    }
+    constructor(arg1, arg2) = {
+        static method create takes arg1, arg2 returns thistype
+            AllocateThis
+    }
+    constructor(arg1, arg2, arg3) = {
+        static method create takes arg1, arg2, arg3 returns thistype
+            AllocateThis
+    }
+    constructor(arg1, arg2, arg3, arg4) = {
+        static method create takes arg1, arg2, arg3, arg4 returns thistype
+            AllocateThis
+    }
+    constructor(arg1, arg2, arg3, arg4, arg5) = {
+        static method create takes arg1, arg2, arg3, arg4, arg5 returns thistype
+            AllocateThis
+    }
+    constructor(arg1, arg2, arg3, arg4, arg5, arg6) = {
+        static method create takes arg1, arg2, arg3, arg4, arg5, arg6 returns thistype
+            AllocateThis
+    }
+    endconstructor() = {
+            return this
+        endmethod
+    }
+enddefine
