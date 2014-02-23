@@ -1,0 +1,7 @@
+library UnitRockLauncher initializer init requires DataCreation
+    private ShortList uids
+    private function init takes nothing returns nothing
+        uids = ShortList.create6('h005', 'h00W', 'h00X', 'h00Y', 'h00Z', 'h010')
+        CreateCombatSetData(uids, AttackCastType_Instant, 'A004', OrderId("berserk"))
+    endfunction
+endlibrary
