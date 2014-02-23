@@ -1,0 +1,81 @@
+///////////////////////////////////////////////////////
+/// Decal
+/// Strilanc's Delayed Call Library
+/// Version: 1.04
+/// Last Updated: February 27, 2009
+///////////////////////////////////////////////////////
+/// Description:
+///   - Provides an easy way to run functions after a delay.
+/// Explanation:
+///   - Reuses internal timers to wait out the delay.
+///   - Stores information in timers' duration for attachment.
+/// Usage:
+///   - Use schedule(Action.function, real delay) to schedule a function with no arguments.
+///   - Use schedule(Action_type.function, real delay, type arg) to schedule a function with an argument.
+///   - Example: call schedule_unit(Action_unit.KillUnit, 5.0, GetTriggerUnit()) //kills triggering unit after 5.0 seconds
+///   - Default available arg types: integer, boolean, real, unit, destructable, item, rect, handle
+///   - If the argument type you need is not supported, you can add an 'AddType' line [see end of library].
+///////////////////////////////////////////////////////
+library Decal
+    private hashtable timerData = InitHashtable()
+    
+    //! textmacro Decal_AddType takes com0, com1, type
+        $com0$ function interface Action takes nothing returns nothing
+        $com1$ function interface Action_$type$ takes $type$ arg returns nothing
+        
+        private struct Ticker_$type$
+            $com0$ private Action action
+            $com1$ private Action_$type$ action
+            $com1$ private $type$ arg
+            private timer ticker
+            
+            ///Catches expiring tickers and runs their action
+            private static method stop takes nothing returns nothing
+                local Ticker_$type$ this = LoadInteger(timerData, 0, GetHandleId(GetExpiredTimer()))
+                $com0$ call .action.evaluate()
+                $com1$ call .action.evaluate(.arg)
+                $com1$ set .arg = Ticker_$type$(-1).arg //clear .arg
+                call .destroy()
+            endmethod
+
+            ///Schedules a function to run in the future
+            $com0$ public static method start takes Action action, real dt returns nothing
+            $com1$ public static method start takes Action_$type$ action, real dt, $type$ arg returns nothing
+                local Ticker_$type$ this = Ticker_$type$.create()
+                if this == 0 then
+                    call BJDebugMsg("Decal Error: Too many Tickers.")
+                    return
+                endif                
+                if .ticker == null then
+                    set .ticker = CreateTimer()
+                endif
+                set .action = action
+                $com1$ set .arg = arg
+                call SaveInteger(timerData, 0, GetHandleId(.ticker), integer(this))
+                call TimerStart(.ticker, dt, false, function Ticker_$type$.stop)
+            endmethod
+        endstruct
+
+        $com0$ function schedule takes Action action, real delay returns nothing
+        $com1$ function schedule_$type$ takes Action_$type$ action, real delay, $type$ arg returns nothing
+        $com0$     call Ticker_$type$.start(action, delay)
+        $com1$     call Ticker_$type$.start(action, delay, arg)
+        endfunction
+    //! endtextmacro
+
+    //0 arguments
+    //! runtextmacro Decal_AddType("","//", "void")
+    //1 arguments
+    //! runtextmacro Decal_AddType("//","", "integer")
+    //! runtextmacro Decal_AddType("//","", "boolean")
+    //! runtextmacro Decal_AddType("//","", "real")
+    //! runtextmacro Decal_AddType("//","", "unit")
+    //! runtextmacro Decal_AddType("//","", "destructable")
+    //! runtextmacro Decal_AddType("//","", "item")
+    //! runtextmacro Decal_AddType("//","", "rect")
+    //! runtextmacro Decal_AddType("//","", "handle")
+    //! runtextmacro Decal_AddType("//","", "effect")
+    //! runtextmacro Decal_AddType("//","", "lightning")
+    //! runtextmacro Decal_AddType("//","", "trigger")
+    //! runtextmacro Decal_AddType("//","", "timer")
+endlibrary
