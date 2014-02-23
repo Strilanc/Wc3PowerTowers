@@ -1,0 +1,7 @@
+library UnitWaterWheel initializer init requires DataCreation
+    private ShortList uids
+    private function init takes nothing returns nothing
+        uids = ShortList.create6('h004', 'h01K', 'h01L', 'h01M', 'h01N', 'h01O')
+        CreateGeneratorSetData(uids, 0, 11, 11)
+    endfunction
+endlibrary
