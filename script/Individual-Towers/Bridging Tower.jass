@@ -1,0 +1,10 @@
+library UnitBridgingTower initializer init requires DataCreation
+    private ShortList uids
+    private function init takes nothing returns nothing
+        uids = ShortList.create6('h003', 'h007', 'h008', 'h01P', 'h01Q', 'h01R')
+        CreateGeneratorSetData(uids, 0, 0, 0)
+        TowerData['h003'].hasDeathAnimation = false
+        TowerData['h007'].hasDeathAnimation = false
+        TowerData['h008'].hasDeathAnimation = false
+    endfunction
+endlibrary
