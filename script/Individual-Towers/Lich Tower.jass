@@ -1,0 +1,7 @@
+library UnitLichTower initializer init requires DataCreation
+    private ShortList uids
+    private function init takes nothing returns nothing
+        uids = ShortList.create6('h00J', 'h01B', 'h01C', 'h01D', 'h01E', 'h01F')
+        CreateCombatSetData(uids, AttackCastType_Unit, 'A00D', OrderId("frostnova"))
+    endfunction
+endlibrary
