@@ -1,0 +1,230 @@
+library PATH requires PAM
+    globals
+        private constant integer MAX_WAYPOINTS = 25 //maximum number of waypoints an individual Path can have
+    endglobals
+    
+    ///Creates a mutated copy of the given rect
+    ///Transformations are applied in argument order
+    private function cloneRect takes rect r, boolean swapXY, boolean flipX, boolean flipY returns rect
+        local real x
+        local real y
+        local real w
+        local real h
+        local real t
+        if r == null then
+            return null
+        endif
+
+        //get rect properties
+        set x = GetRectCenterX(r)
+        set y = GetRectCenterY(r)
+        set w = x - GetRectMinX(r)
+        set h = y - GetRectMinY(r)
+
+        //transform rect properties
+        if swapXY then //reflect along diagonal
+            set t = y
+            set y = x
+            set x = t
+            set t = w
+            set w = h
+            set h = w
+        endif
+        if flipX then //reflect along horizontal
+            set x = -x
+        endif
+        if flipY then //reflect along vertical
+            set y = -y
+        endif
+
+        //create rect from transformed properties
+        return Rect(x-w, y-h, x+w, y+h)
+    endfunction
+
+    public function interface WaypointCallback takes integer pathing_unit returns nothing
+    public function interface FinishedCallback takes integer pathing_unit returns nothing
+    
+    ///Pathing information for units
+    public struct PathingUnit
+        implement PAM_Property
+
+        readonly unit u
+        readonly Path path
+        readonly WaypointCallback waypoint_callback
+        readonly FinishedCallback finished_callback
+        public integer waypointIndex = 1
+        
+        ///Returns current destination waypoint location
+        public method GetTargetLoc takes nothing returns location
+            return Location(.path.getWaypointX(.waypointIndex), .path.getWaypointY(.waypointIndex))
+        endmethod
+        
+        ///Orders the unit to the current destination
+        public method Order takes nothing returns nothing
+            call .checkWaypoint()
+            call IssuePointOrder(.u, "move", .path.getWaypointX(.waypointIndex), .path.getWaypointY(.waypointIndex))
+        endmethod
+
+        public method checkWaypoint takes nothing returns nothing
+            local integer w = .waypointIndex
+            //is this actually a unit reaching its waypoint?
+            if this == PathingUnit(0) then
+                return
+            endif
+            if not .path.isUnitAtWaypoint(.u, w) then
+                return
+            endif
+                
+            //advance waypoint index
+            loop
+                exitwhen w >= .path.numWaypoints //don't throw waypoint event for last waypoint
+                
+                //reached the waypoint
+                call .waypoint_callback.evaluate(this)
+                set w = w + 1
+                set .waypointIndex = w
+                
+                exitwhen not .path.isUnitAtWaypoint(.u, w) //note: the next waypoint might overlap
+            endloop
+            
+            //check for finished
+            if w >= .path.numWaypoints and .path.isUnitAtWaypoint(.u, w) then
+                call .finished_callback.evaluate(this)
+            else
+                call .Order()
+            endif
+        endmethod
+        
+        public static method create takes unit u, Path path, WaypointCallback waypoint_callback, FinishedCallback finished_callback returns PathingUnit
+            local PathingUnit this = PathingUnit.allocate()
+            set PathingUnit[u] = this
+            set .u = u
+            set .path = path
+            set .waypoint_callback = waypoint_callback
+            set .finished_callback = finished_callback
+            if path.isUnitAtWaypoint(u, 1) then
+                set .waypointIndex = 2
+            endif
+            call .Order()
+            return this
+        endmethod
+        
+        private method onDestroy takes nothing returns nothing
+            call PathingUnit.RemoveKey(.u)
+            set .u = null
+            set .path = 0
+            set .waypointIndex = 0
+        endmethod
+    endstruct
+        
+    ///Triggered when any unit enters any waypoint
+    ///Throws waypoint events to the outside if the waypoint is the unit's destination
+    ///Orders the units to the next waypoint
+    private function catchWaypoint takes nothing returns nothing
+        call PathingUnit[GetTriggerUnit()].checkWaypoint();
+    endfunction
+    
+    struct Path
+        private rect array waypointRects[MAX_WAYPOINTS]
+        private region array waypointRegions[MAX_WAYPOINTS]
+        private region waypointUnionRegion = CreateRegion()
+        private trigger waypointTrigger = CreateTrigger()
+        readonly integer numWaypoints = 0
+        
+        public static method create takes nothing returns Path
+            local Path p = Path.allocate()
+            call TriggerRegisterEnterRegion(p.waypointTrigger, p.waypointUnionRegion, null)
+            call TriggerAddAction(p.waypointTrigger, function catchWaypoint)
+            return p
+        endmethod
+        private method onDestroy takes nothing returns nothing
+            local integer i = 1
+            call RemoveRegion(.waypointUnionRegion)
+            call DestroyTrigger(.waypointTrigger)
+            set .waypointUnionRegion = null
+            set .waypointTrigger = null
+            loop
+                exitwhen i > .numWaypoints
+                call RemoveRegion(.waypointRegions[i])
+                call RemoveRect(.waypointRects[i])
+                set .waypointRects[i] = null
+                set .waypointRegions[i] = null
+                set i = i + 1
+            endloop
+            set .numWaypoints = 0
+        endmethod
+                
+        public method addWaypoint takes rect r returns boolean
+            if this == 0 or r == null then
+                return false
+            elseif .numWaypoints >= MAX_WAYPOINTS then
+                call DisplayTextToPlayer(GetLocalPlayer(), 0, 0, "Map Error: Number of waypoints exceeds maximum. (Path.addWaypoint)")
+                return false
+            endif
+            set r = cloneRect(r, false, false, false)
+            set .numWaypoints = .numWaypoints + 1
+            set .waypointRects[.numWaypoints] = r
+            set .waypointRegions[.numWaypoints] = CreateRegion()
+            call RegionAddRect(.waypointRegions[.numWaypoints], r)
+            call RegionAddRect(.waypointUnionRegion, r)
+            return true
+        endmethod
+
+        public method clone takes boolean swapXY, boolean flipX, boolean flipY returns Path
+            local Path p
+            local integer i
+            local rect r
+            if this == 0 then
+                return 0
+            endif
+            set p = Path.create()
+            if p == 0 then
+                return 0
+            endif
+
+            set i = 1
+            loop
+                exitwhen i > .numWaypoints
+                set r = cloneRect(.waypointRects[i], swapXY, flipX, flipY)
+                call p.addWaypoint(r)
+                call RemoveRect(r)
+                set i = i + 1
+            endloop
+            set r = null
+            
+            return p
+        endmethod
+        
+        ///Returns the CenterX of the waypoint with the given index
+        public method getWaypointX takes integer i returns real
+            if this == 0 or i < 1 or i > .numWaypoints then
+                return 0
+            endif
+            return GetRectCenterX(.waypointRects[i])
+        endmethod
+
+        ///Returns the CenterY of the waypoint with the given index
+        public method getWaypointY takes integer i returns real
+            if this == 0 or i < 1 or i > .numWaypoints then
+                return 0
+            endif
+            return GetRectCenterY(.waypointRects[i])
+        endmethod
+
+        ///Returns true if the given unit is at the waypoint with the given index
+        public method isUnitAtWaypoint takes unit u, integer i returns boolean
+            if this == 0 or u == null or i < 1 or i > this.numWaypoints then
+                return false
+            endif
+            return IsUnitInRegion(.waypointRegions[i], u)
+        endmethod
+        
+        ///Returns true if the given point is at any of this path's waypoints
+        public method containsPoint takes real x, real y returns boolean
+            if this == 0 then
+                return false
+            endif
+            return IsPointInRegion(.waypointUnionRegion, x, y)
+        endmethod
+    endstruct
+endlibrary
