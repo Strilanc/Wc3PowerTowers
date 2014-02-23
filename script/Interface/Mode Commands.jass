@@ -1,0 +1,260 @@
+library ModeCommands initializer init requires General, LibDefender, War, HCL, MMD
+    private hashtable data = InitHashtable()
+    private dialog array commandDialogs
+    private trigger dialogTrigger = CreateTrigger()
+    private integer curDialog
+    private function interface Command takes string word returns nothing
+    
+    ///Construction
+    
+    private function AddAbrev takes string abrev, string expanded returns nothing
+        SaveStr(data, 2, StringHash(abrev), expanded)
+    endfunction
+    private function InitCommandGroupingMenu takes integer menuIndex, string title returns nothing
+        if commandDialogs[menuIndex] == null then
+            commandDialogs[menuIndex] = DialogCreate()
+            TriggerRegisterDialogEvent(dialogTrigger, commandDialogs[menuIndex])
+            DialogAddButton(commandDialogs[menuIndex], "(cancel / do nothing)", 0)
+            DialogSetMessage(commandDialogs[menuIndex], title)
+        endif
+    endfunction
+    private function AddCommand takes string word, Command action, integer menuIndex returns nothing
+        if menuIndex > 0 then
+            //create button/dialogs
+            if commandDialogs[menuIndex] == null then
+                InitCommandGroupingMenu(menuIndex, "Select");
+            endif
+            button btn; btn = DialogAddButton(commandDialogs[menuIndex], word, 0)
+            SaveStr(data, 3, GetHandleId(btn), word)
+        endif
+        //register text command
+        SaveInteger(data, 1, StringHash(word), integer(action))
+    endfunction
+    
+    ///Interpretation
+    
+    private function InterpretWord takes string word returns nothing
+        Command com = LoadInteger(data, 1, StringHash(word))
+        if integer(com) != 0 then
+            BJDebugMsg("-" + word)
+            MMD_LogEvent1("Mode", word)
+            com.execute(word)
+        endif
+    endfunction
+    function InterpretLine takes string line returns nothing
+        integer i = 0
+        integer p = 0
+        loop
+            if i >= StringLength(line) or SubString(line, i, i+1) == " " then
+                if SubString(line, p, p+1) == "-" then //this word is a command
+                    if SubString(line, p+1, p+2) == "-" then //this word is an abreviated command
+                        InterpretAbrev.evaluate(SubString(line, p+2, i))
+                    else //normal command
+                        InterpretWord(SubString(line, p+1, i))
+                    endif
+                endif
+                p = i+1
+                exitwhen i >= StringLength(line)
+            endif
+            i += 1
+        endloop
+        UpdateMultiboard()
+    endfunction
+    function InterpretAbrev takes string chars returns nothing
+        integer i
+        loopForIntBelow(i, StringLength(chars))
+            string c; c = SubString(chars, i, i+1)
+            string line; line = LoadStr(data, 2, StringHash(c))
+            if line != null and line != "" then
+                InterpretLine(line)
+            endif
+        endloop
+    endfunction
+    function ShowCommandDialog takes player p, integer index returns nothing
+        if index == 0 then
+            DialogDisplay(p, commandDialogs[curDialog], false)
+        else
+            curDialog = index
+            DialogDisplay(p, commandDialogs[curDialog], true)
+        endif
+    endfunction
+    private function OnDialogClick takes nothing returns nothing
+        InterpretWord(LoadStr(data, 3, GetHandleId(GetClickedButton())))
+        ShowCommandDialog(GetTriggerPlayer(), curDialog+1)
+    endfunction
+    
+    ///Instanciation
+    
+    private function Com_Tech takes string text returns nothing
+        integer i
+        loopForIntBelow(i, 12)
+            SetPlayerTechResearched(Player(i), RESEARCH_GENERATOR, 1)
+            SetPlayerTechResearched(Player(i), RESEARCH_ROUND_1, 1)
+            SetPlayerTechResearched(Player(i), RESEARCH_ROUND_2, 1)
+            SetPlayerTechResearched(Player(i), RESEARCH_ROUND_3, 1)
+            SetPlayerTechResearched(Player(i), RESEARCH_ROUND_4, 1)
+        endloop
+    endfunction
+    
+    private function Com_Rush takes string word returns nothing
+        Game.rushedRounds = true
+    endfunction
+    private function Com_Race takes string word returns nothing
+        Game.syncedRounds = false
+    endfunction
+    private function Com_War takes string word returns nothing
+        if not Game.warMode then
+            Game.warMode = true
+            startWar()
+        endif
+    endfunction
+    
+    private function Com_Solo takes string word returns nothing
+        Game.initTeams(TEAM_TYPE_SOLO)            
+    endfunction
+    private function Com_Corner takes string word returns nothing
+        Game.initTeams(TEAM_TYPE_CORNERS)
+    endfunction
+    private function Com_Side takes string word returns nothing
+        Game.initTeams(TEAM_TYPE_SIDES)
+    endfunction
+    private function Com_Coop takes string word returns nothing
+        Game.initTeams(TEAM_TYPE_COOP)
+    endfunction
+
+    private function Com_Killer takes string word returns nothing
+        Game.fair_income = false
+    endfunction
+    private function Com_Fair takes string word returns nothing
+        Game.fair_income = true
+    endfunction
+    private function Com_Inherit takes string word returns nothing
+        integer i
+        if not Game.inherit_income then
+            Game.inherit_income = true
+            i = 1
+            loop
+                exitwhen i > NUM_DEFENDERS
+                if defenders[i].state != DEFENDER_STATE_DEFENDING then
+                    defenders[i].team.distributeGold(STARTING_GOLD)
+                endif
+                i = i + 1
+            endloop
+        endif
+    endfunction
+    
+    private function Com_Noob takes string word returns nothing
+        Game.difficulty = DIFFICULTY_NOOB
+    endfunction
+    private function Com_Rookie takes string word returns nothing
+        Game.difficulty = DIFFICULTY_ROOKIE
+    endfunction
+    private function Com_Hotshot takes string word returns nothing
+        Game.difficulty = DIFFICULTY_HOTSHOT
+    endfunction
+    private function Com_Veteran takes string word returns nothing
+        Game.difficulty = DIFFICULTY_VETERAN
+    endfunction
+    private function Com_Elite takes string word returns nothing
+        Game.difficulty = DIFFICULTY_ELITE
+    endfunction
+    private function Com_Psycho takes string word returns nothing
+        Game.difficulty = DIFFICULTY_PSYCHO
+    endfunction
+
+    private function Com_Endless takes string word returns nothing
+        Game.numRounds = GAME_LENGTH_ENDLESS
+    endfunction
+    private function Com_LastMan takes string word returns nothing
+        Game.numRounds = GAME_LENGTH_LAST_MAN
+    endfunction
+    private function Com_Rounds takes string word returns nothing
+        Game.numRounds = S2I(SubString(word, StringLength("rounds="), StringLength(word)))
+    endfunction
+    
+    private function Com_SuddenDeath takes string word returns nothing
+        Game.initLives(1)
+    endfunction
+    private function Com_Lives takes string word returns nothing
+        Game.initLives(S2I(SubString(word, StringLength("lives="), StringLength(word))))
+    endfunction
+
+    private function init2 takes nothing returns nothing
+        integer i
+        TriggerAddAction(dialogTrigger, function OnDialogClick)
+
+        AddCommand("tech", Command.Com_Tech, 0)
+                
+        InitCommandGroupingMenu(1, "Select Teams")
+        AddCommand("solo", Command.Com_Solo, 1)
+        AddCommand("corner", Command.Com_Corner, 1)
+        AddCommand("side", Command.Com_Side, 1)
+        AddCommand("coop", Command.Com_Coop, 1)
+                
+        InitCommandGroupingMenu(2, "Select Difficulty")
+        AddCommand("noob", Command.Com_Noob, 2)
+        AddCommand("rookie", Command.Com_Rookie, 2)
+        AddCommand("hotshot", Command.Com_Hotshot, 2)
+        AddCommand("veteran", Command.Com_Veteran, 2)
+        AddCommand("elite", Command.Com_Elite, 2)
+        AddCommand("psycho", Command.Com_Psycho, 2)
+
+        InitCommandGroupingMenu(3, "Select Mode")
+        AddCommand("rush", Command.Com_Rush, 3)
+        AddCommand("war", Command.Com_War, 3)
+        AddCommand("race", Command.Com_Race, 3)
+
+        InitCommandGroupingMenu(4, "Select Rounds")
+        loopForIntBelow(i, 50-1)
+            if i+1 == 15 or i+1 == 30 then
+                AddCommand("rounds=" + I2S(i+1), Command.Com_Rounds, 4)
+            else
+                AddCommand("rounds=" + I2S(i+1), Command.Com_Rounds, 0)
+            endif
+        endloop
+        AddCommand("endless", Command.Com_Endless, 4)
+        AddCommand("lastman", Command.Com_LastMan, 4)
+
+        InitCommandGroupingMenu(5, "Select Lives")
+        AddCommand("suddendeath", Command.Com_SuddenDeath, 5)
+        loopForIntBelow(i, 50-1)
+            if i+1 == 10 or i+1 == 25 then
+                AddCommand("lives=" + I2S(i+1), Command.Com_Lives, 5)
+            else
+                AddCommand("lives=" + I2S(i+1), Command.Com_Lives, 0)
+            endif
+        endloop
+
+        InitCommandGroupingMenu(6, "Select Income Type")
+        AddCommand("fair", Command.Com_Fair, 6)
+        AddCommand("killer", Command.Com_Killer, 6)
+        AddCommand("inherit", Command.Com_Inherit, 6)
+
+        //abbreviated commands
+        AddAbrev("a", "-race")
+        AddAbrev("c", "-coop")
+        AddAbrev("d", "-endless")
+        AddAbrev("e", "-elite")
+        AddAbrev("h", "-hotshot")
+        AddAbrev("i", "-inherit")
+        AddAbrev("k", "-killer")
+        AddAbrev("j", "-lives=1")
+        AddAbrev("l", "-lives=10")
+        AddAbrev("m", "-lastman")
+        AddAbrev("n", "-noob")
+        AddAbrev("o", "-corner")
+        AddAbrev("p", "-psycho")
+        AddAbrev("r", "-rookie")
+        AddAbrev("s", "-side")
+        AddAbrev("t", "-tech")
+        AddAbrev("u", "-rush")
+        AddAbrev("v", "-veteran")
+        AddAbrev("w", "-war")
+        AddAbrev("y", "-rounds=30")
+        //abbreviated modes
+        AddAbrev("0", "-psycho -race -rush -lives=1 -endless")
+    endfunction
+    private function init takes nothing returns nothing
+        schedule(Action.init2, 0.0)
+    endfunction
+endlibrary
