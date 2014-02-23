@@ -1,0 +1,8 @@
+library UnitClockTower initializer init requires DataCreation
+    private ShortList uids
+    private function init takes nothing returns nothing
+        uids = ShortList.create6('h03C', 'h03D', 'h03E', 'h03F', 'h03G', 'h03H')
+        CreateCombatSetData(uids, 0, 'A00J', 0)
+        TowerData['h03E'].hasDeathAnimation = false
+    endfunction
+endlibrary
