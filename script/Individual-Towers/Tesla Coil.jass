@@ -1,0 +1,7 @@
+library UnitTeslaCoil initializer init requires DataCreation
+    private ShortList uids
+    private function init takes nothing returns nothing
+        uids = ShortList.create6('h002', 'h00A', 'h00N', 'h00O', 'h00P', 'h00Q')
+        CreateCombatSetData(uids, AttackCastType_Unit, 'A001', OrderId("chainlightning"))
+    endfunction
+endlibrary
