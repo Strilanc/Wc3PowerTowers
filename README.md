@@ -15,4 +15,4 @@ Towers sell for 100% of their cost, encouraging constant reworking of your maze.
 
 Power towers also has alternative modes to keep things interesting: `race`, `rush`, and `war`. In `rush` mode, the next round countdown starts as soon as *any* player finishes the current round (instead of *all* players). In `race` mode, a player can start their own next round (even if the current one hasn't finished). For true danger, combine race and rush. In `war` mode, players can spend energy to send extra spawns to others.
 
-There are also options for controlling the number of lives (sudden death, 10, 25, ...), the number of rounds (last man standing, endless, 15, 30, ...), and the difficulty.
+There are also options for controlling the number of lives (sudden death, 10, 25, ...), the number of rounds (last man standing, endless, 15, 30, ...), the difficulty, teams (ffa, corners, sides, coop), and who gets income when a runner dies (owner, killer).
