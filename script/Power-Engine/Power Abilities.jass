@@ -1,0 +1,50 @@
+library TowerTransferAbilities initializer init uses LibTower
+    constant integer AID_AddTransfer = 'A000'
+    constant integer AID_FarTransfer = 'A00Q'
+    constant integer AID_RemoveTransfer = 'A006'
+    
+    private function OnCast takes nothing returns boolean
+        integer at = GetSpellAbilityId()
+        if at != AID_AddTransfer and at != AID_FarTransfer and at != AID_RemoveTransfer then
+            return true
+        endif
+        
+        Tower src; src = Tower[GetTriggerUnit()]
+        assert(src != 0)
+        Tower dst; dst = Tower[GetSpellTargetUnit()]
+        TowerTransfer transfer; transfer = TowerTransfer.fromSrcDst(src, dst)
+        
+        if at == AID_RemoveTransfer then
+            if transfer != 0 then
+                transfer.destroy()
+            endif
+        else //at == AID_AddTransfer or at == AID_FarTransfer
+            if dst == 0 or dst == src then
+                showUnitTextToPlayer(src.u, "|cFFFF0000Invalid Target|r", GetOwningPlayer(src.u))
+                return true
+            elseif transfer != 0 then
+                showUnitTextToPlayer(dst.u, "|cFFFFCC00Already Transfering|r", GetOwningPlayer(src.u))
+                return true
+            elseif dst.numTransfersIn >= MAX_TOWER_TRANSFERS then
+                showUnitTextToPlayer(dst.u, "|cFFFF0000Max Transfers In|r", GetOwningPlayer(src.u))
+                return true
+            elseif src.farTransfering or at == AID_FarTransfer then
+                //far transfers cancel all other transfers
+                src.CancelTransfersOut()
+            elseif src.numTransfersOut >= MAX_TOWER_TRANSFERS then
+                showUnitTextToPlayer(src.u, "|cFFFF0000Max Transfers Out|r", GetOwningPlayer(src.u))
+                return true
+            endif
+
+            src.farTransfering = (at == AID_FarTransfer)
+            transfer = TowerTransfer.create(src, dst)
+            assert(transfer != 0)
+        endif
+        
+        return true
+    endfunction
+    
+    private function init takes nothing returns nothing
+        AddFastUnitEventHandler(EVENT_PLAYER_UNIT_SPELL_EFFECT, function OnCast)
+    endfunction
+endlibrary
