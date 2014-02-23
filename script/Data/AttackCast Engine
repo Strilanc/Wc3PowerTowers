@@ -1,0 +1,107 @@
+library AttackCast initializer init uses PAM, Special
+    constant integer AttackCastType_Instant = 1
+    constant integer AttackCastType_Unit = 2
+    constant integer AttackCastType_Point = 3
+    constant integer AttackCastType_Origin = 4
+
+    private struct AttackCaster
+        implement PAM_Property
+        
+        readonly unit caster
+        readonly integer orderId
+        readonly integer castType
+        
+        public static method TryCreate takes unit caster returns AttackCaster
+            assert(caster != null)
+            
+            if thistype[caster] != 0 then; return thistype[caster]; endif
+            local AttackCastData dat = AttackCastData[GetUnitTypeId(caster)]
+            if dat == 0 then; return 0; endif
+            
+            AllocateThis
+            set thistype[caster] = this
+
+            .caster = caster
+            .orderId = dat.orderId
+            .castType = dat.castType
+            
+            return this
+        endmethod
+        
+        private method onDestroy takes nothing returns nothing
+            assert(this != 0)
+            thistype.RemoveKey(.caster)
+            .caster = null
+        endmethod
+    endstruct
+
+    struct AttackCastData
+        implement PAM_RawProperty
+        readonly integer unitId
+        readonly integer orderId
+        readonly integer castType
+        public constructor(integer unitId, integer orderId, integer castType)
+            assert(unitId != 0)
+            assert(orderId != 0)
+            assert(AttackCastData[unitId] == 0)
+            
+            .unitId = unitId
+            .orderId = orderId
+            .castType = castType
+
+            AttackCastData[unitId] = this            
+            return this
+        endmethod
+        private method onDestroy takes nothing returns nothing
+            assert(this != 0)
+            set AttackCastData[.unitId] = 0
+        endmethod
+    endstruct
+
+    //! runtextmacro CreatePair("order", "unit", "u", "integer", "oid")
+    private function InstantOrderPair takes integer pair_arg returns nothing
+        local Pair_order order = pair_arg
+        call IssueImmediateOrderById(order.u, order.oid)
+        call order.destroy()
+    endfunction
+    private function scheduleInstantOrderId takes real delay, unit u, integer oid returns nothing
+        call schedule_integer(Action_integer.InstantOrderPair, delay, Pair_order.create(u, oid))
+    endfunction
+    
+    private function OnAttack takes nothing returns nothing
+        AttackCaster t = AttackCaster[GetAttacker()]
+        if t == 0 then; return; endif
+
+        if t.castType == AttackCastType_Unit then
+            IssueTargetOrderById(t.caster, t.orderId, GetTriggerUnit())
+            
+        elseif t.castType == AttackCastType_Instant then
+            IssueImmediateOrderById(t.caster, t.orderId)
+            
+        elseif t.castType == AttackCastType_Point then
+            IssuePointOrderById(t.caster, t.orderId, GetUnitX(GetTriggerUnit()), GetUnitY(GetTriggerUnit()))
+            
+        elseif t.castType == AttackCastType_Origin then
+            IssuePointOrderById(t.caster, t.orderId, GetUnitX(t.caster), GetUnitY(t.caster))
+        endif
+    endfunction
+    private function OnEnter takes nothing returns nothing
+        AttackCaster.TryCreate(GetTriggerUnit())
+    endfunction
+    private function OnUpgrade takes nothing returns nothing
+        AttackCaster.TryCreate(GetTriggerUnit())
+    endfunction
+    private function OnDeath takes nothing returns nothing
+        local AttackCaster ac = AttackCaster[GetTriggerUnit()]
+        if ac != 0 then
+            ac.destroy()
+        endif
+    endfunction
+
+    private function init takes nothing returns nothing
+        AddUnitEnterMapEventHandler(function OnEnter)
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_DEATH, function OnDeath)
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_ATTACKED, function OnAttack)
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function OnUpgrade)
+    endfunction
+endlibrary
