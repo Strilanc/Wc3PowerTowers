@@ -1,0 +1,29 @@
+library LibAbilities initializer init requires Special, TowerTransferAbilities
+    private constant real TRANSFER_RANGE = 350  //Update range when changed
+
+    private function ShowTransformationEffect takes unit u returns nothing
+        createTimedAttachedEffect(u, "Abilities\\Spells\\Items\\TomeOfRetraining\\TomeOfRetrainingCaster.mdl", "origin", 3.0)
+    endfunction
+    
+    private function OnCast takes nothing returns boolean
+        integer at = GetSpellAbilityId()
+        if at == ABIL_TRANSFORM then
+            schedule_unit(Action_unit.ShowTransformationEffect, 0., GetTriggerUnit())
+        elseif at == ABIL_SELL then
+            //Delay needed for death animation and seller's remorse
+            schedule_unit(Action_unit.KillUnit2, 0., GetTriggerUnit())
+        elseif at == ABIL_SHOW_RANGES then
+            //Attack Range
+            createCircleEffect(GetUnitX(GetTriggerUnit()), GetUnitY(GetTriggerUnit()), GetUnitDefaultAcquireRange(GetTriggerUnit()), "Doodads\\Cinematic\\GlowingRunes\\GlowingRunes0.mdl")
+            //Transfer Range
+            if GetUnitAbilityLevel(GetTriggerUnit(), AID_AddTransfer) > 0 then
+                createCircleEffect(GetUnitX(GetTriggerUnit()), GetUnitY(GetTriggerUnit()), TRANSFER_RANGE, "Doodads\\Cinematic\\GlowingRunes\\GlowingRunes6.mdl")
+            endif
+        endif
+        return true
+    endfunction
+    
+    private function init takes nothing returns nothing
+        AddFastUnitEventHandler(EVENT_PLAYER_UNIT_SPELL_EFFECT, function OnCast)
+    endfunction
+endlibrary
