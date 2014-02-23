@@ -1,0 +1,47 @@
+library DataCreation uses PowerDatabase, TowerDatabase, AttackCast, PAM, ShortList
+    function CreateGeneratorSetData takes ShortList uids, \
+                                          integer abilityId, \
+                                          integer produc, \
+                                          integer estimate returns nothing
+        assert(uids != 0)
+        integer i
+        integer uid
+        loopForIntBelow(i, uids.count)
+            uid = uids.items[i]
+            PowerData.create(uid, GetUnitPointValueByType(uid), produc*R2I(Pow(2, i+1)-1), -estimate*R2I(Pow(2, i+1)-1))
+            TowerData.create(uid, abilityId, i+1)
+        endloop
+    endfunction
+    
+    function CreateCombatSetData takes ShortList uids, \
+                                       integer castType, \
+                                       integer abilityId, \
+                                       integer orderId returns nothing
+        assert(uids != 0)
+        integer i
+        integer uid
+        loopForIntBelow(i, uids.count)
+            uid = uids.items[i]
+            PowerData.create(uid, GetUnitPointValueByType(uid), 0, GetUnitPointValueByType(uid)/2)
+            TowerData.create(uid, abilityId, i+1)
+            if orderId != 0 then
+                AttackCastData.create(uid, orderId, castType)
+            endif
+        endloop
+    endfunction
+    
+    function TintDataSet takes ShortList uids, \
+                               integer tintRed, \
+                               integer tintGreen, \
+                               integer tintBlue returns nothing
+        assert(uids != 0)
+        integer i
+        integer uid
+        loopForIntBelow(i, uids.count)
+            uid = uids.items[i]
+            PowerData[uid].tintRed = tintRed
+            PowerData[uid].tintGreen = tintGreen
+            PowerData[uid].tintBlue = tintBlue
+        endloop
+    endfunction
+endlibrary
