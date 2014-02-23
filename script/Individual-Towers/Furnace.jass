@@ -1,0 +1,108 @@
+library UnitFurnace initializer init uses DataCreation
+    private ShortList uids
+    private constant real GRASS_REGROW_PERIOD = 1.0 //seconds between each row of grass regrowing
+    private constant integer FURNACE_GRASS_REACH = 2 //the max tile distance the furnace can reach
+    private constant real FURNACE_FUEL_PERIOD = 5.0 //seconds between furnaces burning grass
+    private constant integer NumGrassLevels = 3
+    private integer array grassTiles
+    private integer grassRegrowCol = 0
+
+    ///Adjusts the grass level of the terrain at a given point
+    ///tileX, tileY = tile index coordinates
+    ///return = true if the tile was changed
+    private function TryAdjustGrassLevel takes integer tileX, integer tileY, boolean increase returns boolean
+        real x = tileX*TILE_SIZE
+        real y = tileY*TILE_SIZE
+        integer tile = GetTerrainType(x, y)
+        integer newTile = 0
+        integer i
+        
+        loopForIntBelow(i, NumGrassLevels)
+            if tile == grassTiles[i] then
+                if increase then
+                    newTile = grassTiles[i+1]
+                else
+                    newTile = grassTiles[i-1]
+                endif
+            endif
+        endloop
+        
+        if newTile != 0 and newTile != tile then
+            call SetTerrainType(x, y, newTile, -1, 1, 1)
+            return true
+        else
+            return false
+        endif
+    endfunction
+
+    ///Picks a random nearby patch of grass to burn
+    private function TryToBurnNearbyGrass takes real x, real y, integer tileRadius returns boolean
+        //area
+        integer diameter = tileRadius*2+1
+        integer cx = R2I(x / 128)
+        integer cy = R2I(y / 128)
+
+        //random starting tile offset
+        integer dx = GetRandomInt(0, diameter-1)
+        integer dy = GetRandomInt(0, diameter-1)
+
+        //scan the tiles in range starting from the chosen tile for burnable grass
+        integer i
+        loopForIntBelow(i, diameter)
+            integer j
+            loopForIntBelow(j, diameter)
+                integer tileX; tileX = cx + ModuloInteger(i+dx, diameter) - tileRadius
+                integer tileY; tileY = cy + ModuloInteger(j+dy, diameter) - tileRadius
+                if TryAdjustGrassLevel(tileX, tileY, false) then
+                    return true
+                endif
+            endloop
+        endloop
+
+        //failed to find grass
+        return false
+    endfunction
+
+    ///Causes furnaces to burn nearby grass for fuel
+    private function isFurnace takes integer ut returns boolean
+        return ut == 'h000' or ut == 'h011' or ut == 'h012' or ut == 'h013' or ut == 'h014' or ut == 'h015'
+    endfunction
+    private function CatchFurnaceTick takes nothing returns nothing
+        integer i
+        loopForIntBelow(i, Tower.num)
+            Tower t
+            t = Tower.list[i]
+            if isFurnace(GetUnitTypeId(t.u)) then
+                t.blockProduction = not TryToBurnNearbyGrass(GetUnitX(t.u), GetUnitY(t.u), FURNACE_GRASS_REACH)
+                if t.blockProduction then
+                    showUnitText(t.u, "|cFFFF0000No Grass|r")
+                endif
+            endif
+        endloop
+    endfunction
+
+    ///Regrows the grass row on row, that mark our place; and in the sky; The larks, still bravely singing, fly;
+    private function RegrowNextGrassColumn takes nothing returns nothing
+        integer radius = MAP_SIZE / 2
+
+        //next column
+        grassRegrowCol += 1
+        if grassRegrowCol > radius then; grassRegrowCol = -radius; endif
+
+        //regrow the column
+        integer row
+        loopForIntBelow(row, MAP_SIZE)
+            TryAdjustGrassLevel(grassRegrowCol, row-radius, true)
+        endloop
+    endfunction
+
+    private function init takes nothing returns nothing
+        uids = ShortList.create6('h000', 'h011', 'h012', 'h013', 'h014', 'h015')
+        AddPeriodicEventHandler(FURNACE_FUEL_PERIOD, function CatchFurnaceTick)
+        AddPeriodicEventHandler(GRASS_REGROW_PERIOD, function RegrowNextGrassColumn)
+        grassTiles[0] = 'Zdrg' //grassy dirt
+        grassTiles[1] = 'Zgrs' //normal grass
+        grassTiles[2] = 'Zvin' //dark grass
+        CreateGeneratorSetData(uids, 0, 5, 5)
+    endfunction
+endlibrary
