@@ -1,0 +1,98 @@
+///Implements the -ready command. Handles different modes.
+library libCommandReady initializer init requires General, Constants, LibDefender
+    private integer array defendersReadyRound
+
+    ///Catches and handles -ready commands
+    private function OnChat takes nothing returns nothing
+        local integer i
+        local integer n
+        local Defender td = Defender[GetTriggerPlayer()]
+        local Defender d
+        local string s = StringCase(GetEventPlayerChatString(), false)
+        local boolean bIndividual
+        if s != "-ready" or td == 0 or td.state != DEFENDER_STATE_DEFENDING then
+            return
+        elseif Game.numRounds <= MAX_ROUNDS and td.team.maxRound >= Game.numRounds then
+            return
+        endif
+
+        //Restrictions
+        if Game.state != GAME_STATE_INTRO and Game.syncedRounds and td.team.state != TEAM_STATE_WAITING then
+            call DisplayTextToPlayer(td.p,0,0, "You can't use -ready during rounds.")
+            return
+        endif
+
+        //Place the Vote
+        set bIndividual = (not Game.syncedRounds and td.team.maxRound > 0)
+        set defendersReadyRound[td.index] = td.team.maxRound + 1
+        if not bIndividual then
+            print(td.getNameWithColor() + " is ready")
+        else
+            call td.team.ShowTeamMessage(td.getNameWithColor() + " is ready")
+        endif
+
+        //Enumerate un-ready players
+        set i = 1
+        set n = 0
+        set s = ""
+        loop
+            //Enumerate team members or all depending on mode
+            if not bIndividual then
+                exitwhen i > NUM_DEFENDERS
+                set d = defenders[i]
+            else
+                exitwhen i > td.team.numMembers
+                set d = td.team.members[i]
+            endif
+            
+            //Check for non-ready
+            if defendersReadyRound[d.index] <= td.team.maxRound and d.state == DEFENDER_STATE_DEFENDING then
+                if GetPlayerController(d.p) == MAP_CONTROL_USER then
+                    if (n > 0) then
+                        set s = s + ", "
+                    endif
+                    set s = s + d.getNameWithColor()
+                    set n = n + 1
+                endif
+            endif
+            
+            set i = i + 1
+        endloop
+        
+        //Cancel if anyone important wasn't ready
+        if n > 0 then
+            if not bIndividual then
+                print(I2S(n) + " still not ready. (" + s + ")")
+            else
+                call td.team.ShowTeamMessage(I2S(n) + " still not ready. (" + s + ")")
+            endif
+            return
+        endif
+
+        //Everyone important is ready, try to start the round
+        if Game.state == GAME_STATE_INTRO then
+            call Game.startGame()
+        endif
+        if not bIndividual then
+            //Start round for everyone
+            print("All Players Ready.")
+            set i = 1
+            loop
+                exitwhen i > Team.numAllocated
+                call Team.teams[i].startNextRound()
+                set i = i + 1
+            endloop
+        else
+            //Start round for team
+            if td.team.numMembers > 1 then
+                call td.team.ShowTeamMessage("Team Ready.")
+            endif
+            call td.team.startNextRound()
+        endif
+    endfunction
+
+    ///Initializes events
+    private function init takes nothing returns nothing
+        AddChatEventHandler("-ready", false, function OnChat)
+    endfunction
+endlibrary
