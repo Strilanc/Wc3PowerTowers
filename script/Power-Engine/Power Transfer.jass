@@ -1,0 +1,103 @@
+library LibTowerTransfer initializer init requires General
+    private string array beamEffectName
+    private boolean array beamEffectReversed
+    private integer array beamEffectEnergyBound
+    private constant integer NumBeamLevels = 5
+    
+    private function init takes nothing returns nothing
+        beamEffectName[0] = "LEAS" //magic leash
+        beamEffectName[1] = "DRAL" //drain life
+        beamEffectName[2] = "DRAM" //drain mana
+        beamEffectName[3] = "HWSB" //healing secondary
+        beamEffectName[4] = "SPLK" //spirit link
+        beamEffectReversed[1] = true
+        beamEffectReversed[2] = true
+        beamEffectEnergyBound[0] = 1
+        beamEffectEnergyBound[1] = 25
+        beamEffectEnergyBound[2] = 125
+        beamEffectEnergyBound[3] = 625
+    endfunction
+    
+    //Represents a continuous energy transfer between two towers
+    struct TowerTransfer
+        readonly Tower src
+        readonly Tower dst
+        private lightning beam = null
+        private integer lastBeamLevel = -1
+
+        ///Finds the transfer from src to dst
+        public static method fromSrcDst takes Tower src, Tower dst returns TowerTransfer
+            if src == 0 or dst == 0 then; return 0; endif
+
+            //find in src's transferOuts (ignore dst's transferIns)
+            integer i
+            loopForIntBelow(i, src.numTransfersOut)
+                if src.transfersOut[i].dst == dst then
+                    return src.transfersOut[i]
+                endif
+            endloop
+
+            return 0
+        endmethod
+
+        ///Changes the lightning effect to reflect the energy transfered
+        public method Redraw takes integer dEnergy returns nothing
+            assert(this != 0)
+            
+            integer lvl
+
+            //Pick which beam level to use
+            loopForIntBelow(lvl, NumBeamLevels-1)
+                exitwhen dEnergy < beamEffectEnergyBound[lvl]
+            endloop
+
+            //Update the effect
+            if lvl != this.lastBeamLevel then
+                DestroyLightning(.beam)
+                .lastBeamLevel = lvl
+                if beamEffectReversed[lvl] then
+                    .beam = AddLightning(beamEffectName[lvl], true, GetUnitX(.dst.u), GetUnitY(.dst.u), GetUnitX(.src.u), GetUnitY(.src.u))
+                else
+                    .beam = AddLightning(beamEffectName[lvl], true, GetUnitX(.src.u), GetUnitY(.src.u), GetUnitX(.dst.u), GetUnitY(.dst.u))
+                endif
+            endif
+        endmethod
+
+        ///Creates a transfer between two towers
+        public constructor(Tower src, Tower dst)
+            assert(src != 0)
+            assert(dst != 0)
+            //assert(TowerTransfer.fromSrcDst(src, dst) == 0) [comma causes parse error in cJass as of aug26-09]
+            assert(src.numTransfersOut < MAX_TOWER_TRANSFERS)
+            assert(dst.numTransfersIn < MAX_TOWER_TRANSFERS)
+
+            //init
+            .src = src
+            .dst = dst
+
+            //link from src and dst
+            boolean isLinked; isLinked = src.LinkTransfer(this) and dst.LinkTransfer(this)
+            assert(isLinked)
+
+            //fancy-prancy
+            SetSoundPosition(gg_snd_PowerTransfer, GetUnitX(.src.u), GetUnitY(.src.u), 0)
+            StartSound(gg_snd_PowerTransfer)
+            .Redraw(1)
+            
+            return this
+        endmethod
+
+        ///Removes a transfer between two towers
+        private method onDestroy takes nothing returns nothing
+            assert(this != 0)
+            
+            //unlink from src and dst
+            boolean isUnlinked; isUnlinked = .src.RemoveTransfer(this) and .dst.RemoveTransfer(this)
+            assert(isUnlinked)
+
+            //un-fancy-prancy
+            DestroyLightning(.beam)
+            .beam = null
+        endmethod
+    endstruct
+endlibrary
