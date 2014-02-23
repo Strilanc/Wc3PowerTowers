@@ -1,0 +1,50 @@
+///Contains a lot of the constants used by the engine
+///Includes various runner properties
+///Includes the "isX" functions for towers
+library Constants
+    //=== Main ===
+    constant integer NUM_DEFENDERS                 = 8 //the number of players
+    constant  player RUNNERS_OWNER                 = Player(10-1) //light blue
+    constant    real SELL_PERCENTAGE               = 1.0 //remember to update tool tips if this is changed
+    constant integer STARTING_GOLD                 = 25 //gold given to players at start of game
+
+    //=== Sensitive === (require other changes in code to work)
+    constant integer MAX_ROUND                     = 30 //number of rounds. Make sure you have enough unit types defined!
+
+    //=== Game ===
+    constant integer MAP_SIZE                      = 96 //the number of tiles from the center to the side
+    constant integer MAP_RADIUS                    = MAP_SIZE*64
+    constant    real ROUND_WAIT_TIME               = 30.0 //seconds between rounds
+    constant    real RUSHED_ROUND_WAIT_TIME        = 10.0 //seconds between rounds in rushed mode
+    constant    real SELECTION_TIME                = 150.0 //seconds
+    constant integer SPAWNS_PER_ROUND              = 10
+    constant    real SPAWN_PERIOD                  = 4.5 //time between normal spawns
+    constant    real MIN_SPAWN_PERIOD              = 0.5 //minimum time between spawns (for war/race)
+    constant integer MAX_ROUNDS                    = 500
+    constant integer MAX_STRUCTURES                = 8190
+
+    //=== Ability Behaviour ===
+    constant integer MAX_TOWER_TRANSFERS           = 8    //Update tooltip when changed
+
+    //=== Ability, Buff and Unit IDs ===
+    constant integer ABIL_RUNNER_SHIELD            = 'A007'
+    constant integer ABIL_RUNNER_FEEDBACK          = 'A00C'
+    constant integer ABIL_RUNNER_SPEED             = 'A00B'
+    constant integer ABIL_SELL                     = 'A003'
+    constant integer ABIL_SHOW_RANGES              = 'A005'
+    constant integer ABIL_TRANSFORM                = 'A002'
+    constant integer ABIL_UNSELL                   = 'A00R'
+    constant integer UNIT_BARRACKS                 = 'h044'
+    constant integer UNIT_BUILDER_1                = 'u000'
+    constant integer UNIT_BUILDER_2                = 'u001'
+    constant integer UNIT_HERO_TOWER               = 'H03J'
+    constant integer UNIT_HERO_TOWER_FAKE          = 'h03K'
+    constant integer UNIT_HERO_TOWER_PATH          = 'h03Q'
+        
+    //=== Research ===
+    constant integer RESEARCH_GENERATOR            = 'R000'
+    constant integer RESEARCH_ROUND_1              = 'R002'
+    constant integer RESEARCH_ROUND_2              = 'R001'
+    constant integer RESEARCH_ROUND_3              = 'R003'
+    constant integer RESEARCH_ROUND_4              = 'R004'
+endlibrary
