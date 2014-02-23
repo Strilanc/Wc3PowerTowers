@@ -1,0 +1,29 @@
+library TowerDatabase uses General
+    struct TowerData
+        implement PAM_RawProperty
+        
+        boolean hasDeathAnimation = true
+        readonly integer unitId
+        readonly integer abilityId
+        readonly integer level
+        
+        public constructor(integer unitId, integer abilityId, integer level)
+            assert(unitId != 0)
+            
+            .unitId = unitId
+            .abilityId = abilityId
+            .level = level
+            
+            //preload
+            RemoveUnit(CreateUnit(Player(15), unitId, 0, 0, 0))
+            
+            TowerData[unitId] = this
+            return this
+        endmethod
+        
+        private method onDestroy takes nothing returns nothing
+            assert(this != 0)
+            TowerData[.unitId] = 0
+        endmethod
+    endstruct
+endlibrary
