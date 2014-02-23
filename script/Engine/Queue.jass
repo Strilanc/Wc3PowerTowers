@@ -1,0 +1,137 @@
+///The Queue implements a queue of integers.
+///It stores things in an orderly fashion.
+library QueueStructLib requires General
+    globals
+        private integer totalQueueNodes = 0
+        private integer totalQueues = 0
+        private constant boolean STRICT_WARNINGS = true
+    endglobals
+    
+    function Queue_NumQueueNodes takes nothing returns integer
+        return totalQueueNodes
+    endfunction
+    function Queue_NumQueues takes nothing returns integer
+        return totalQueues
+    endfunction
+    
+    ///Linked list node
+    private struct QueueNode
+        readonly QueueNode next = QueueNode(0)
+        readonly integer val
+        public static method create takes integer val, QueueNode prev returns QueueNode
+            local QueueNode n = QueueNode.allocate()
+            if n == 0 then
+                call BJDebugMsg("Map Error: Unable to allocate a QueueNode. (QueueNode.create)")
+                return QueueNode(0)
+            endif
+            set n.val = val
+            if prev != 0 then
+                set prev.next = n
+            endif
+            set totalQueueNodes = totalQueueNodes + 1
+            return n
+        endmethod
+        private method onDestroy takes nothing returns nothing
+            set .next = 0
+            set totalQueueNodes = totalQueueNodes - 1
+        endmethod    
+    endstruct
+
+    ///Queue of linked list nodes
+    struct Queue
+        readonly static integer numAllocated = 0
+        private QueueNode first = QueueNode(0)
+        private QueueNode last = QueueNode(0)
+        readonly integer size = 0
+                        
+        ///Appends a value to the end of the queue
+        public method append takes integer i returns boolean
+            local QueueNode n
+            if this == Queue(0) then
+                return false
+            endif
+            
+            //pack in a node
+            set n = QueueNode.create(i, .last)
+            if n == QueueNode(0) then
+                return false
+            endif
+            
+            //append node to the list
+            set this.last = n
+            if .first == QueueNode(0) then
+                set .first = n
+            endif
+            set .size = .size + 1
+            return true
+        endmethod
+            
+        ///Returns the oldest value in the queue
+        public method peek takes nothing returns integer
+            local integer i
+            if this == Queue(0) or .size <= 0 then
+                if STRICT_WARNINGS then
+                    call BJDebugMsg("Map Error: Attempted to peek at empty Queue. (Queue.peek)")
+                endif
+                return 0
+            endif        
+            return .first.val
+        endmethod
+
+        ///Returns the oldest value in the queue and removes it from the queue
+        public method pop takes nothing returns integer
+            local integer ival
+            local QueueNode n
+            if this == Queue(0) or .size <= 0 then
+                if STRICT_WARNINGS then
+                    call BJDebugMsg("Map Error: Attempted to pop empty Queue. (Queue.pop)")
+                endif
+                return 0
+            endif
+
+            //get value
+            set ival = .first.val
+            
+            //remove node from list
+            set n = .first
+            set .first = .first.next
+            if .first == QueueNode(0) then
+                set .last = .first
+            endif
+            call n.destroy()
+            set .size = .size - 1
+            
+            return ival
+        endmethod
+
+        ///Clears all nodes from the queue
+        public method clear takes nothing returns nothing
+            loop
+                exitwhen .first == QueueNode(0)
+                call .pop()
+            endloop
+        endmethod
+
+        ///Creates an empty queue
+        public static method create takes nothing returns Queue
+            local Queue q = Queue.allocate()
+            if q == 0 then
+                call BJDebugMsg("Map Error: Unable to allocate a Queue. (Queue.create)")
+                return Queue(0)
+            endif
+            set totalQueues = totalQueues + 1
+            return q
+        endmethod
+        
+        ///Ensures queues are cleared before being destroyed
+        private method onDestroy takes nothing returns nothing
+            if .size > 0 then
+                call .clear()
+                if STRICT_WARNINGS then
+                    call BJDebugMsg("Map Error: Destroyed non-empty queue. (Queue.onDestroy)")
+                endif
+            endif
+            set totalQueues = totalQueues - 1
+        endmethod
+    endstruct
+endlibrary
