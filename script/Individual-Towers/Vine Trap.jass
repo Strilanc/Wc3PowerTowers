@@ -1,0 +1,26 @@
+library UnitVineTrap initializer init requires DataCreation
+    private ShortList uids
+    private constant integer AID_Entangle = 'A00E'
+    private real array duration
+    
+    private function OnCast takes nothing returns boolean
+        if GetSpellAbilityId() == AID_Entangle then
+            schedule_integer(Action_integer.OrderRunnerToWaypoint, \
+                             0.1+duration[GetUnitAbilityLevel(GetTriggerUnit(), AID_Entangle)], \
+                             Runner.fromUnit(GetSpellTargetUnit()))
+        endif
+        return true
+    endfunction
+    
+    private function init takes nothing returns nothing
+        uids = ShortList.create6('h01S', 'h01T', 'h01U', 'h01V', 'h01W', 'h01X')
+        AddFastUnitEventHandler(EVENT_PLAYER_UNIT_SPELL_EFFECT, function OnCast)
+        CreateCombatSetData(uids, AttackCastType_Unit, AID_Entangle, OrderId("entanglingroots"))
+        duration[1] = 1.0
+        duration[2] = 1.5
+        duration[3] = 2.0
+        duration[4] = 2.5
+        duration[5] = 3.0
+        duration[6] = 3.5
+    endfunction
+endlibrary
