@@ -1,0 +1,7 @@
+library UnitDemonTower initializer init requires DataCreation
+    private ShortList uids
+    private function init takes nothing returns nothing
+        uids = ShortList.create6('h009', 'h016', 'h017', 'h018', 'h019', 'h01A')
+        CreateCombatSetData(uids, 0, 'A009', 0)
+    endfunction
+endlibrary
