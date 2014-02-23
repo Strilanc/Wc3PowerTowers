@@ -1,0 +1,7 @@
+library UnitPyroTrap initializer init requires DataCreation
+    private ShortList uids
+    private function init takes nothing returns nothing
+        uids = ShortList.create6('h00G', 'h00I', 'h02R', 'h02S', 'h02T', 'h02U')
+        CreateCombatSetData(uids, AttackCastType_Origin, 'A00F', OrderId("flamestrike"))
+    endfunction
+endlibrary
