@@ -1,0 +1,56 @@
+library ShortList
+    private constant integer MAX_ITEMS = 6
+    struct ShortList
+        readonly integer array items[MAX_ITEMS]
+        readonly integer count
+        public static method create takes nothing returns thistype
+            AllocateThis
+            .count = 0
+        endconstructor
+        public static method create1 takes integer v1 returns thistype
+            AllocateThis
+            .count = 1
+            .items[0] = v1
+        endconstructor
+        public static method create2 takes integer v1, integer v2 returns thistype
+            AllocateThis
+            .count = 2
+            .items[0] = v1
+            .items[1] = v2
+        endconstructor
+        public static method create3 takes integer v1, integer v2, integer v3 returns thistype
+            AllocateThis
+            .count = 3
+            .items[0] = v1
+            .items[1] = v2
+            .items[2] = v3
+        endconstructor
+        public static method create4 takes integer v1, integer v2, integer v3, integer v4 returns thistype
+            AllocateThis
+            .count = 4
+            .items[0] = v1
+            .items[1] = v2
+            .items[2] = v3
+            .items[3] = v4
+        endconstructor
+        public static method create5 takes integer v1, integer v2, integer v3, integer v4, integer v5 returns thistype
+            AllocateThis
+            .count = 5
+            .items[0] = v1
+            .items[1] = v2
+            .items[2] = v3
+            .items[3] = v4
+            .items[4] = v5
+        endconstructor
+        public static method create6 takes integer v1, integer v2, integer v3, integer v4, integer v5, integer v6 returns thistype
+            AllocateThis
+            .count = 6
+            .items[0] = v1
+            .items[1] = v2
+            .items[2] = v3
+            .items[3] = v4
+            .items[4] = v5
+            .items[5] = v6
+        endconstructor
+    endstruct
+endlibrary
