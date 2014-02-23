@@ -1,0 +1,31 @@
+library PowerDatabase uses General, PAM
+    struct PowerData
+        implement PAM_RawProperty
+        
+        integer tintRed = 255
+        integer tintBlue = 255
+        integer tintGreen = 255
+        readonly integer unitId
+        readonly integer transferPower
+        readonly integer production
+        readonly integer usageEstimate
+        
+        public constructor(integer unitId, integer transferPower, integer production, integer usageEstimate)
+            assert(unitId != 0)
+            assert(transferPower >= 0)
+            
+            .unitId = unitId
+            .transferPower = transferPower
+            .production = production
+            .usageEstimate = usageEstimate
+
+            PowerData[unitId] = this
+            return this
+        endmethod
+        
+        private method onDestroy takes nothing returns nothing
+            assert(this != 0)
+            PowerData[.unitId] = 0
+        endmethod
+    endstruct
+endlibrary
