@@ -1,0 +1,323 @@
+library LibTower initializer init requires General, Constants, Special, LibDefender, LibTeam, LibTowerTransfer
+    struct Tower
+        implement PAM_Property
+        //instance list
+        readonly static integer num = 0
+        readonly static Tower array list
+        readonly integer listIndex
+
+        //unit
+        readonly unit u = null
+        readonly PowerData data
+        readonly integer maxEnergy = 0
+        public boolean blockProduction = false
+
+        //transfer state
+        readonly integer numTransfersOut = 0
+        readonly integer numTransfersIn = 0
+        readonly TowerTransfer array transfersOut[MAX_TOWER_TRANSFERS]
+        readonly TowerTransfer array transfersIn[MAX_TOWER_TRANSFERS]
+        readonly integer lastEnergy = 0
+        private integer totalReceived = 0
+        private integer totalSent = 0
+        private integer numSlowedByTransferRate = 0
+        private integer bottleNeckedCount = 0
+        public boolean farTransfering = false
+
+        public method CancelTransfersOut takes nothing returns nothing
+            assert(this != 0)
+            loopUntil(.numTransfersOut <= 0)
+                .transfersOut[0].destroy()
+            endloop
+        endmethod
+        public method CancelTransfersIn takes nothing returns nothing
+            assert(this != 0)
+            loopUntil(.numTransfersIn <= 0)
+                .transfersIn[0].destroy()
+            endloop
+        endmethod
+        
+        ///Updates the properties stored about a tower
+        public method RefreshData takes nothing returns nothing
+            assert(this != 0)
+            .data = PowerData[GetUnitTypeId(.u)]
+            .maxEnergy = R2I(GetUnitState(.u, UNIT_STATE_MAX_MANA))
+            assert(.data != 0)
+        endmethod
+
+        ///Returns the current mana of the tower
+        public method GetEnergy takes nothing returns integer
+            assert(this != 0)
+            return R2I(GetUnitState(.u, UNIT_STATE_MANA))
+        endmethod
+        ///Returns the most mana this tower can receive before the next tick
+        public method MaxReceivableEnergy takes nothing returns integer
+            assert(this != 0)
+            return IMinBJ(.maxEnergy-.GetEnergy(), .data.transferPower-.totalReceived)
+        endmethod
+
+        ///Inserts a TowerTransfer into the correct transfer list
+        public method LinkTransfer takes TowerTransfer tt returns boolean
+            local integer i
+            if tt == 0 then; return false; endif
+
+            //add to out transfers if this is the source
+            if tt.src == this then
+                //check if already in list
+                loopForIntBelow(i, .numTransfersOut)
+                    if .transfersOut[i] == tt then
+                        return false
+                    endif
+                endloop
+                //add to list
+                .transfersOut[.numTransfersOut] = tt
+                .numTransfersOut += 1
+                return true
+            endif
+
+            //add to in transfers if this is the destination
+            if tt.dst == this then
+                //check if already in list
+                loopForIntBelow(i, .numTransfersIn)
+                    if .transfersIn[i] == tt then
+                        return false
+                    endif
+                endloop
+                //add to list
+                .transfersIn[.numTransfersIn] = tt
+                .numTransfersIn += 1
+                return true
+            endif
+
+            return false
+        endmethod
+
+        ///Removes a TowerTransfer from the transfer list
+        public method RemoveTransfer takes TowerTransfer tt returns boolean
+            integer i
+            assert(this != 0)
+            assert(tt != 0)
+
+            //Remove from out-transfers if this is the source
+            if this == tt.src then
+                loopForIntBelow(i, this.numTransfersOut)
+                    if .transfersOut[i] == tt then
+                        .numTransfersOut = .numTransfersOut - 1
+                        .transfersOut[i] = .transfersOut[.numTransfersOut]
+                        .transfersOut[.numTransfersOut] = 0
+                        return true
+                    endif
+                endloop
+            endif
+
+            //Remove from in-transfers if this is the destination
+            if this == tt.dst then
+                loopForIntBelow(i, this.numTransfersIn)
+                    if .transfersIn[i] == tt then
+                        .numTransfersIn = .numTransfersIn - 1
+                        .transfersIn[i] = .transfersIn[.numTransfersIn]
+                        .transfersIn[.numTransfersIn] = 0
+                        return true
+                    endif
+                endloop
+            endif
+
+            return false
+        endmethod
+        
+        ///Increases this tower's mana by the given value
+        public method SetEnergy takes integer e returns nothing
+            assert(this != 0)
+            SetUnitState(.u, UNIT_STATE_MANA, IMinBJ(e, .maxEnergy))
+        endmethod
+        public method AdjustEnergy takes integer de returns nothing
+            assert(this != 0)
+            .SetEnergy(.GetEnergy() + de)
+        endmethod
+
+        //Do a single bubble-sort pass over the transfer list to favor needy towers
+        //Guaranteed to place the neediest tower at the end of the list
+        private method PerformSortingPass takes nothing returns nothing
+            assert(this != 0)
+            if .numTransfersOut < 2 then; return; endif
+            
+            TowerTransfer transfer; transfer = .transfersOut[0]
+            integer maxSeen; maxSeen = transfer.dst.MaxReceivableEnergy()
+            integer i
+            loopForIntBelow(i, .numTransfersOut-1)
+                integer e; e = .transfersOut[i+1].dst.MaxReceivableEnergy()
+                if e <= maxSeen then
+                    //keep shifting the best so far towards the end of the list
+                    .transfersOut[i] = .transfersOut[i+1]
+                    .transfersOut[i+1] = transfer
+                else
+                    //new best so far
+                    transfer = .transfersOut[i+1]
+                    maxSeen = e
+                endif
+            endloop
+        endmethod
+        
+        ///Transfer energy to other towers for this tick
+        ///NOTE: Towers with lots of needed energy are placed towards the end of the
+        ///destination list because any energy surplus due to capacitiy early in the list
+        ///rolls-over to the later towers in the list.
+        private method PushEnergy takes nothing returns nothing
+            assert(this != 0)
+            
+            .PerformSortingPass()
+
+            //transfer energy out
+            //note: lastEnergy >= current energy because this tower hasn't transfered out yet this tick
+            integer e; e = IMinBJ(.data.transferPower, .lastEnergy)
+            integer n; n = .numTransfersOut
+            integer i
+            loopForIntBelow(i, .numTransfersOut)
+                TowerTransfer tt; tt = .transfersOut[i]
+                Tower dst; dst = tt.dst
+
+                //compute amount to send
+                integer de; de = e/n
+                integer te1; te1 = dst.data.transferPower - dst.totalReceived //transfer capacity of receiver
+                integer te2; te2 = dst.maxEnergy - IMaxBJ(dst.GetEnergy(), dst.lastEnergy) //energy capacity of receiver
+                if te1 < de or te2 < de then
+                    if te1 < te2 then
+                        de = te1
+                        .numSlowedByTransferRate += 1
+                    else
+                        de = te2
+                    endif
+                endif
+                
+                //transfer
+                dst.totalReceived += de
+                .totalSent += de
+                dst.AdjustEnergy(de)
+                .AdjustEnergy(-de)
+                tt.Redraw(de)
+                e -= de
+                
+                n -= 1
+            endloop
+        endmethod
+        
+        ///Displays information about state
+        public method Draw takes nothing returns nothing
+            assert(this != 0)
+            
+            integer e; e = .GetEnergy()
+            integer de; de = e - .lastEnergy
+            if .totalSent > 0 and de >= 0 and e > .maxEnergy - .data.transferPower and .numSlowedByTransferRate >= .numTransfersOut/2 then
+                .bottleNeckedCount = between(0, .bottleNeckedCount + 3, 15)
+                if .bottleNeckedCount >= 15 then
+                    showUnitText(.u, "|cFFFF0000Bottlenecked|r")
+                endif
+            else
+                .bottleNeckedCount -= 1
+            endif
+            .lastEnergy = e
+            .totalReceived = 0
+            .totalSent = 0
+            .numSlowedByTransferRate = 0
+
+            //show floating text
+            if de > 0 then
+                showUnitText(.u, "|cFF0000FF+" + I2S(de) + "|r")
+            elseif de < 0 then
+                showUnitText(.u, "|cFFFF00FF" + I2S(de) + "|r")
+            elseif .lastEnergy == 0 and .numTransfersIn == 0 and .data.usageEstimate > 0 then
+                showUnitText(.u, "|cFFFF0000No Power|r")
+            elseif .numTransfersOut == 0 and .lastEnergy >= .maxEnergy and .data.production > 0 then
+                showUnitText(.u, "|cFFFF0000No Target|r")
+            endif
+
+            //darken/brighting the tower based on energy level
+            if .maxEnergy > 0 then
+                real r; r = I2R(.lastEnergy) / .maxEnergy * 0.75 + 0.25
+                SetUnitVertexColor(.u, R2I(r*.data.tintRed), R2I(r*.data.tintGreen), R2I(r*.data.tintBlue), 255)
+            endif
+        endmethod
+
+        ///Updates all towers by one second
+        public static method CatchTick takes nothing returns nothing
+            integer i
+            Tower t
+
+            //generate
+            loopForIntBelow(i, Tower.num)
+                t = Tower.list[i]
+                if not t.blockProduction then
+                    t.AdjustEnergy(t.data.production)
+                endif
+            endloop
+
+            //transfer energy
+            loopForIntBelow(i, Tower.num)
+                Tower.list[i].PushEnergy()
+            endloop
+
+            //Draw
+            loopForIntBelow(i, Tower.num)
+                Tower.list[i].Draw()
+            endloop
+
+            //finish
+            UpdateMultiboard()
+        endmethod
+            
+        ///Creates a tower structure for a given unit
+        public constructor(unit u)
+            assert(u != null)
+            assert(Tower[u] == null)
+            
+            .u = u
+            .RefreshData()
+
+            .Draw()
+
+            .listIndex = Tower.num
+            Tower.list[Tower.num] = this
+            Tower.num += 1
+            Tower[u] = this
+            return this
+        endmethod
+
+        ///Cleans up properly
+        private method onDestroy takes nothing returns nothing
+            assert(this != 0)
+
+            //destroy transfers
+            .CancelTransfersOut()
+            .CancelTransfersIn()
+
+            //remove from global array
+            Tower.num -= 1
+            Tower.list[Tower.num].listIndex = .listIndex
+            Tower.list[.listIndex] = Tower.list[Tower.num]
+            Tower.list[Tower.num] = 0
+
+            //destroy other stuff
+            Tower.RemoveKey(.u)
+            .u = null
+        endmethod
+    endstruct
+    
+    private function OnDeath takes nothing returns nothing
+        Tower t = Tower[GetTriggerUnit()]
+        if t != 0 then; t.destroy(); endif
+    endfunction
+
+    private function OnUpgrade takes nothing returns nothing
+        Tower t = Tower[GetTriggerUnit()]
+        if t != 0 then; t.RefreshData(); endif
+    endfunction
+
+    private function init takes nothing returns nothing
+        AddPeriodicEventHandler(1.0, function Tower.CatchTick)
+        
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_DEATH, function OnDeath)
+        
+        AddUnitEventHandler(EVENT_PLAYER_UNIT_UPGRADE_FINISH, function OnUpgrade)
+        AddUnitEventHandler(EVENT_PLAYER_HERO_LEVEL, function OnUpgrade)
+    endfunction
+endlibrary
