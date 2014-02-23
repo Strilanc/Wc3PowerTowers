@@ -1,0 +1,54 @@
+library UnitTsunamiTower initializer init requires Special, DataCreation
+    private ShortList uids
+    private constant real Range = 360
+    private constant real MaxTargets = 5
+    private constant string EffectPath = "Objects\\Spawnmodels\\Naga\\NagaDeath\\NagaDeath.mdl"
+    private constant integer AID_WaterBurst = 'A00N'
+    private real array damage
+    
+    private function OnCast takes nothing returns boolean
+        if GetSpellAbilityId() != AID_WaterBurst then; return true; endif
+
+        unit caster
+        caster = GetTriggerUnit()
+
+        //Effects
+        createBang(GetUnitX(caster)-100,GetUnitY(caster)-100, EffectPath)
+        createBang(GetUnitX(caster)+100,GetUnitY(caster)- 90, EffectPath)
+        createBang(GetUnitX(caster)-100,GetUnitY(caster)+100, EffectPath)
+        createBang(GetUnitX(caster)+100,GetUnitY(caster)+100, EffectPath)
+        
+        //Compute damage
+        real dmg
+        dmg = damage[GetUnitAbilityLevel(caster, AID_WaterBurst)]
+        assert(dmg != 0)
+        GroupEnumUnitsInRange(StackGroup(), GetUnitX(caster), GetUnitY(caster), Range, Condition(function Runner.filter_isRunner))
+        integer n
+        n = CountUnitsInGroup(TopGroup())
+        if n <= 0 then; PopGroup(); caster = null; return true; endif
+        dmg *= RMinBJ(MaxTargets, n)/n
+        
+        //Deal damage
+        unit target
+        loopThroughUnitGroupDestructive(target, TopGroup())
+            UnitDamageTarget(caster, target, dmg, true, false, ATTACK_TYPE_NORMAL, DAMAGE_TYPE_UNIVERSAL, WEAPON_TYPE_WHOKNOWS)
+        endloop
+        PopGroup()
+        
+        caster = null
+        return true
+    endfunction
+    
+    private function init takes nothing returns nothing
+        uids = ShortList.create6('h03I', 'h03L', 'h03M', 'h03N', 'h03O', 'h03P')
+        AddFastUnitEventHandler(EVENT_PLAYER_UNIT_SPELL_EFFECT, function OnCast)
+        damage[1] = 60.0
+        damage[2] = 171.8
+        damage[3] = 385.0
+        damage[4] = 796.2
+        damage[5] = 1594.3
+        damage[6] = 3150.0
+        CreateCombatSetData(uids, AttackCastType_Instant, AID_WaterBurst, OrderId("thunderclap"))
+        TowerData['h03I'].hasDeathAnimation = false
+    endfunction
+endlibrary
